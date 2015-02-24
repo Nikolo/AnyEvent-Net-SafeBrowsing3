@@ -1,0 +1,6 @@
+*.snap
+share/init.lua
+test_update.pl
+*.log
+share/safe_browsing_box.pid
+*.swp
