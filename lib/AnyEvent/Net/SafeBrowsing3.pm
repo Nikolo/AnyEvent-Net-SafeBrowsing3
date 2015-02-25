@@ -16,11 +16,11 @@ use AnyEvent::Net::SafeBrowsing3::Utils;
 use Mouse;
 use AnyEvent::HTTP;
 
-our $VERSION = '2.01';
+our $VERSION = '1.01';
 
 =head1 NAME
 
-AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v2 API.
+AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v3 API.
 
 =head1 SYNOPSIS
 
@@ -40,7 +40,7 @@ AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v2 
   $storage->dbh->connect();
 
   my $sb = AnyEvent::Net::SafeBrowsing3->new({
-	server => "http://safebrowsing.clients.google.com/safebrowsing/", 
+	server => "http://safebrowsing.google.com/safebrowsing/", 
 	key => "key";
 	storage => $storage,
   });
@@ -59,7 +59,7 @@ TODO
 
 =head1 DESCRIPTION
 
-AnyEvent::Net::SafeBrowsing3 implements the Google Safe Browsing v2 API.
+AnyEvent::Net::SafeBrowsing3 implements the Google Safe Browsing v3 API.
 
 The library passes most of the unit tests listed in the API documentation. See the documentation (L<https://developers.google.com/safe-browsing/developers_guide_v2>) for more details about the failed tests.
 
@@ -87,7 +87,6 @@ Create a AnyEvent::Net::SafeBrowsing3 object
 	key 	=> "key", 
     storage	=> AnyEvent::Net::SafeBrowsing3::Tarantool->new(...),
 	log     => AnyEvent::Net::SafeBrowsing3::Log->new({debug_level => 'debug3'}),
-	mac		=> 0,
   );
 
 Arguments
@@ -151,10 +150,9 @@ Retry timeout after unknown fail. Default 30 sec
 =cut
 
 has server       => (is => 'rw', isa => 'Str', required => 1 );
-has mac_server   => (is => 'rw', isa => 'Str' );
+#TODO is neccessary? has mac_server   => (is => 'rw', isa => 'Str' );
 has key          => (is => 'rw', isa => 'Str', required => 1 );
 has version      => (is => 'rw', isa => 'Str', default => '3.0' );
-has mac          => (is => 'rw', isa => 'Bool', default => 0 );
 has log_class    => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3::Log' );
 has storage      => (is => 'rw', isa => 'Object', default => sub {AnyEvent::Net::SafeBrowsing3::Storage->new()});
 has data         => (is => 'rw', isa => 'Object');
@@ -204,7 +202,7 @@ sub update {
 	die "Required callback" unless $cb_ret;
 	return unless $list;
 	if( $self->in_update() ){
-		# Already in update status next try after 30 sec 
+		# Already in update status, next try after 30 sec 
 		$cb_ret->( $self->default_retry() );
 		return;
 	}
@@ -221,65 +219,55 @@ sub update {
 		my $info = $self->data->get('updated/'.$item);
 		log_info( "Update info: ", $info );
 		if(!$info || $info->{'time'} + $info->{'wait'} < AE::now() || $self->force ) {
-			log_info("OK to update $item: " . AE::now() . "/" . ($info ? $info->{'time'} +  $info->{'wait'} : 'first update'));
+                        # OK to update list info
+			log_info("OK to update $item: " . AE::now() . "/" . 
+                                  ($info ? $info->{'time'} +  $info->{'wait'} : 'first update'));
 			my $do_request = sub {
-				my($client_key, $wrapped_key) = @_;
-				if ($self->mac && (!$client_key || !$wrapped_key)) {
-					log_error("MAC error ".$client_key.", ".$wrapped_key);
-					$cb->($self->default_retry());
-				}
-				else {
-					$self->storage->get_regions(list => $item, cb => sub {
-						my($a_range, $s_range) = @_;
-						unless( defined $a_range ){
-							log_error( 'Get range error' );
-							$cb->($self->default_retry());
-							return;
-						}
-						my $chunks_list = '';
-						if ($a_range ne '') {
-							$chunks_list .= "a:$a_range";
-						}
-						if ($s_range ne '') {
-							$chunks_list .= ":" if ($a_range ne '');
-							$chunks_list .= "s:$s_range";
-						}
-						my $body .= "$item;$chunks_list";
-						$body .= ":mac" if ($self->mac);
-						$body .= "\n";
-						my $url = $self->server."downloads?client=api&key=".$self->key."&appver=$VERSION&pver=".$self->version;
-						$url .= "&wrkey=$wrapped_key" if $self->mac;
-				 		log_debug1( "Url: ".$url );
-				 		log_debug1( "Body: ".$body );
-						http_post( $url, $body, %{$self->param_for_http_req}, sub {
-							my ($data, $headers) = @_; 
-							if( $headers->{Status} == 200 ){
-								if( $data ){
-									log_debug3("Response body: ".$data);
-									$self->process_update_data( $data, {client_key => $client_key, wrapped_key => $wrapped_key}, $cb );
+				$self->storage->get_regions(list => $item, cb => sub {
+					my($a_range, $s_range) = @_;
+					unless( defined $a_range ){
+						log_error( 'Get range error' );
+						$cb->($self->default_retry());
+						return;
+					}
+					my $chunks_list = '';
+					if ($a_range ne '') {
+						$chunks_list .= "a:$a_range";
+					}
+					if ($s_range ne '') {
+						$chunks_list .= ":" if ($a_range ne '');
+						$chunks_list .= "s:$s_range";
+					}
+					my $body .= "$item;$chunks_list";
+					$body .= "\n";
+					my $url = $self->server . "downloads?client=api&key=" . $self->key
+                                                                . "&appver=$VERSION&pver=" . $self->version;
+				 	log_debug1( "Url: ".$url );
+				 	log_debug1( "Body: ".$body );
+					http_post( $url, $body, %{$self->param_for_http_req}, sub {
+						my ($data, $headers) = @_; 
+						if( $headers->{Status} == 200 ){
+							if( $data ){
+								log_debug3("Response body: ".$data);
+								$self->process_update_data( $data, $cb );
 								}
-								else {
-									$cb->($self->default_retry());
-								}
-							}
 							else {
-								log_error("Bad response from server ".$headers->{Status} );
-								$self->update_error($item, $cb);
+								$cb->($self->default_retry());
 							}
-							return;
-						});
+						}
+						else {
+							log_error("Bad response from server ".$headers->{Status} );
+							$self->update_error($item, $cb);
+						}
 						return;
 					});
-				}
+					return;
+				});
 				return;
 			};
 
-			if( $self->mac ){
-				$self->get_mac_keys( $do_request );
-			}
-			else {
-				$do_request->();
-			}
+			$do_request->();
+			
 		}
 		else {
 			log_info("Too early to update $item");
@@ -879,7 +867,7 @@ sub request_mac_keys {
 		if( $headers->{Status} == 200 ){
 			if ($data =~ s/^clientkey:(\d+)://mi) {
 				my $length = $1;
-				log_debug1("MAC client key length: $length");
+				rog_debug1("MAC client key length: $length");
 				$client_key = substr($data, 0, $length, '');
 				log_debug2("MAC client key: $client_key");
 				substr($data, 0, 1, ''); # remove 
@@ -1386,9 +1374,7 @@ __PACKAGE__->meta->make_immutable();
 
 See L<AnyEvent::Net::SafeBrowsing3::Storage>, L<AnyEvent::Net::SafeBrowsing3::Tarantool> for information on storing and managing the Safe Browsing database.
 
-Google Safe Browsing v2 API: L<http://code.google.com/apis/safebrowsing/developers_guide_v2.html>
-
-Yandex Safe Browsing v2 API: L<http://api.yandex.ru/safebrowsing/>
+Google Safe Browsing v3 API: L<https://developers.google.com/safe-browsing/developers_guide_v3.html>
 
 =head1 AUTHOR
 
