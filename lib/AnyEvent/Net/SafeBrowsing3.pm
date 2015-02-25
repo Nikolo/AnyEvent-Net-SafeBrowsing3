@@ -15,6 +15,9 @@ use AnyEvent::Net::SafeBrowsing3::Storage;
 use AnyEvent::Net::SafeBrowsing3::Utils;
 use Mouse;
 use AnyEvent::HTTP;
+# FOR DEBUG ONLY
+use Data::Dumper;
+use feature qw(say);
 
 our $VERSION = '1.01';
 
@@ -412,11 +415,29 @@ sub param_for_http_req {
 
 Process the data received from server.
 
+data format:
+
+n:1200
+i:googpub-phish-shavar
+u:cache.google.com/first_redirect_example
+sd:1,2
+i:acme-white-shavar
+u:cache.google.com/second_redirect_example
+ad:1-2,4-5,7
+sd:2-6
+
+And makes a list of redirection links (from "u:" tag).
+Then calls parse_data() function foreach item in redirection list.
+
 =cut
 
 sub process_update_data {
-	my ($self, $data, $keys, $cb) = @_;
+	my ($self, $data, $cb) = @_;
 	my @lines = split /\s/, $data;
+
+        say "========= DUMPER ============";
+        say Dumper(\@lines);
+        say "=============================";
 
 	my $wait = $self->default_retry();
 
@@ -437,35 +458,13 @@ sub process_update_data {
 			$list = $1;
 			$self->data->set( 'updated/'.$list, {'time' => AE::now(), 'wait' => $wait} ) if $wait;
 		}
-		elsif ($line =~ /m:(\S+)$/ && $self->mac) {
-			my $hmac = $1;
-			log_debug3("MAC of request: $hmac");
-
-			# Remove this line for data
-			$data =~ s/^m:(\S+)//g;
-
-			if (!AnyEvent::Net::SafeBrowsing3::Utils->validate_data_mac(data => $data, key => $keys->{client_key}, digest => $hmac, logger => $self->log) ) {
-				log_error("MAC error on main request");
-				@redirections = ();
-				last;
-			}
-		}
-		elsif ($line =~ /u:\s*(\S+),(\S+)\s*$/) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_debug1("Redirection: $1");
-			log_debug3("MAC: $2");
-			push(@redirections, [$1, $list, $2]);
-		}
 		elsif ($line =~ /u:\s*(\S+)\s*$/) {
 			unless( $list ){
 				log_error("Unknown list. Skip.");
 				next;
 			}
 			log_debug1("Redirection: $1");
-			push(@redirections, [$1, $list, '']);
+			push(@redirections, [$1, $list]);
 		}
 		elsif ($line =~ /ad:(\S+)$/) {
 			unless( $list ){
@@ -492,16 +491,6 @@ sub process_update_data {
 			my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
 			$self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {}) if @$nums;
 		}
-		elsif ($line =~ /e:pleaserekey/ && $keys->{client_key}) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_info("MAC key has been expired");
-			$self->delete_mac_keys();
-			$wait = 10;
-			last;
-		}
 		elsif ($line =~ /r:pleasereset/) {
 			unless( $list ){
 				log_error("Unknown list. Skip.");
@@ -522,17 +511,11 @@ sub process_update_data {
 		my $data = shift( @$redirections );
 		my $redirection = $data->[0];
 		$list = $data->[1];
-		my $hmac = $data->[2];
 		log_debug1("Url: https://$redirection");
 		http_get( "https://$redirection", %{$self->param_for_http_req}, sub {
 			my ($data, $headers) = @_; 
 			log_debug1("Checking redirection https://$redirection ($list)");
 			if( $headers->{Status} == 200 ){
-				if( $self->mac && !AnyEvent::Net::SafeBrowsing3::Utils->validate_data_mac(data => $data, key => $keys->{client_key}, digest => $hmac) ) {
-					log_error("MAC error on redirection");
-					log_debug1("Length of data: " . length($data));
-					$have_error = 1;
-				}
 				$self->parse_data(data => $data, list => $list, cb => sub {
 					my $error = shift;
 					if( $error ){
