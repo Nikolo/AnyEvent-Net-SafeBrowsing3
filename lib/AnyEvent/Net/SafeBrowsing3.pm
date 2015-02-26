@@ -15,6 +15,7 @@ use AnyEvent::Net::SafeBrowsing3::Storage;
 use AnyEvent::Net::SafeBrowsing3::Utils;
 use Mouse;
 use AnyEvent::HTTP;
+use Google::ProtocolBuffers;
 # FOR DEBUG ONLY
 use Data::Dumper;
 use feature qw(say);
@@ -166,6 +167,8 @@ has http_timeout => (is => 'ro', isa => 'Int', default => '60');
 has user_agent   => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3 client '.$VERSION );
 has cache_time   => (is => 'ro', isa => 'Int', default => 45*60);
 has default_retry=> (is => 'ro', isa => 'Int', default => 30);
+#has protobuf_struct => (is =>'rw', lazy_build => 1);
+
 =head1 PUBLIC FUNCTIONS
 
 =over 4
@@ -288,7 +291,7 @@ Perform a force database update.
 
 Return the time of next hope to update db
 
-Be careful if you call this method as too frequent updates might result in the blacklisting of your API key.
+Be careful if you call this method as noo frequent updates might result in the blacklisting of your API key.
 
 Arguments
 
@@ -907,7 +910,119 @@ Parse data from a rediration (add asnd sub chunk information).
 
 =cut
 
+#======================================
+=head2 parse_data_v3
+
+Parse data from a rediraction.
+Data comes in ProtoBuf format
+
+=cut
+
+# parse_data_v3(
+# #      data => $data, 
+# #      list => $list, 
+# #      cb => sub {...})
+# # процедура (ничего не возвращает)
+# # ARGUMENTS:
+# # $data - тело ответа на https-запрос по redirection ссылке. двоичные данные, содержат несколько структур ProtoBuf
+# #     -----------------------------------------------------------
+# #     BODY      = (UINT32 CHUNKDATA)+
+# #     UINT32    = Unsigned 32-bit integer in network byte order.    => число=длина след.фрагмента данных, который нужно распоковать как Protobuf
+# #     CHUNKDATA = Encoded ChunkData protocol message, see below.    => данные длиной UINT32 байт, которые можно распоковать с помощью ProtoBuf
+# #     -----------------------------------------------------------
+# # 
+# # $list - название списка (available list types: goog-malware-shavar, goog-regtest-shavar, goog-whitedomain-shavar, googpub-phish-shavar)
+# # $cb - callback function
+
+#======================================
+
 sub parse_data {
+    my ($self, %args) 	= @_;
+    my $data 		= $args{data} 		|| '';
+    my $list 		= $args{list} 		|| '';
+    my $cb		= $args{cb} 		or die "Callback is required";
+	
+    my $protobuf_len = 0;
+    my $protobuf_data = '';
+	
+    my $bulk_insert_a = [];
+    my $bulk_insert_s = [];
+
+	
+    # читаем побайтно данные из $data (выдергивая их)
+    while (length $data > 0) {
+        $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
+        say Dumper($self->protobuf_struct);
+        $protobuf_data = $self->protobuf_struct->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+        #$protobuf_data = ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+
+	# perl hash format of decoded protobuf data is 
+	# (~ - for optional fields. they're available throught accessor):
+	# {
+	#    chunk_number => int32,
+	#  ~ chunk_type   => 0 or 1 (for ADD / SUB. ADD default),
+	#  ~ prefix_type  => 0 or 1 (for 4B / 32B. 4B default),
+	#  ~ hashes       => packed bites as string,
+	#    add_numbers  => [456789, 456123, ....] список из int32, только в sub чанке используется
+	# }
+
+	my $chunk_num = $protobuf_data->chunk_number();
+	my $chunk_type = $protobuf_data->chunk_type();
+	my $hash_length = $protobuf_data->prefix_type() ? 32 : 4;
+	
+	if ($chunk_type == 0) {
+            # it is add chunk
+	    my @data = parse_a_v3(value => $protobuf_data->hashes(), 
+			    hash_length => $hash_length);
+	    foreach my $item (@data) {
+	        push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };	
+	    }	    	
+	}
+	elsif ($chunk_type == 1) {
+	    # it is sub chunk
+	    my @data = parse_s_v3( value => $protobuf_data->hashes(), 
+                               hash_length => $hash_length,
+                               add_chunknum => \$protobuf_data->add_numbers() );
+            foreach my $item (@data) {
+        	push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };	
+            }
+	}
+	else {
+	    # it is unknown chunk
+	    log_error("Incorrect chunk type: $chunk_type, should be 0 or 1 (for a: or s:)");
+	    $cb->(1);
+	    return;
+	} 
+        # OLD: log_debug1("$type$chunk_num:$hash_length:$chunk_length OK");
+	log_debug1(join "", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len OK");
+    }
+
+    my $in_process = 0; # сколько хранилищ (add, sub) обновляется
+    my $have_error = 0;
+
+    my $watcher = sub {
+	my $err = shift;
+	$in_process--;
+	$have_error ||= $err;
+	log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
+	if(!$in_process){
+            $cb->($have_error);
+	}
+    };
+	
+    ++$in_process if @$bulk_insert_a;
+    ++$in_process if @$bulk_insert_s;
+	
+    #TODO add_chunks_a, add_chunks_s
+    $self->storage->add_chunks_a($bulk_insert_a, $watcher) if @$bulk_insert_a;
+    $self->storage->add_chunks_s($bulk_insert_s, $watcher) if @$bulk_insert_s; 
+	
+    return;
+}
+
+#===================================
+
+sub parse_data_v2 {
 	my ($self, %args) 	= @_;
 	my $data			= $args{data}		 || '';
 	my $list  			= $args{list}		 || '';
@@ -917,19 +1032,6 @@ sub parse_data {
 	my $chunk_length = 0;
 	my $bulk_insert_a = [];
 	my $bulk_insert_s = [];
-=rem
-	my $in_process = 0;
-	my $have_error = 0;
-	my $watcher = sub {
-		my $err = shift;
-		$in_process--;
-		$have_error ||= $err;
-		log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
-		if(!length( $data ) && !$in_process){
-			$cb->($have_error);
-		}
-	};
-=cut
 	while (length $data > 0) {
 #		$in_process++;
 		my $type = substr($data, 0, 2, ''); # s:34321:4:137
@@ -1349,6 +1451,44 @@ sub request_full_hash {
 	});
 	return;
 }
+
+#sub _build_protobuf_struct {
+#    Google::ProtocolBuffers->parse("
+#        message ChunkData {
+#            required int32 chunk_number = 1;
+#
+#            // The chunk type is either an add or sub chunk.
+#            enum ChunkType {
+#                ADD = 0;
+#                SUB = 1;
+#            }
+#            optional ChunkType chunk_type = 2 [default = ADD];
+#
+#            // Prefix type which currently is either 4B or 32B.  The default is set
+#            // to the prefix length, so it doesn't have to be set at all for most
+#            // chunks.
+#         
+#            enum PrefixType {
+#                PREFIX_4B = 0;
+#                FULL_32B = 1;
+#            }
+#        
+#            optional PrefixType prefix_type = 3 [default = PREFIX_4B];
+#            // Stores all SHA256 add or sub prefixes or full-length hashes. The number
+#            // of hashes can be inferred from the length of the hashes string and the
+#            // prefix type above.
+#        
+#            optional bytes hashes = 4;
+#
+#            // Sub chunks also encode one add chunk number for every hash stored above.
+#        
+#            repeated int32 add_numbers = 5 [packed = true];
+#        }",
+#
+#        { create_accessors => 1 } 
+#    );    
+#    return ;
+#}
 
 no Mouse;
 __PACKAGE__->meta->make_immutable();
