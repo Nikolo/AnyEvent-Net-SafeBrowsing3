@@ -167,7 +167,6 @@ has http_timeout => (is => 'ro', isa => 'Int', default => '60');
 has user_agent   => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3 client '.$VERSION );
 has cache_time   => (is => 'ro', isa => 'Int', default => 45*60);
 has default_retry=> (is => 'ro', isa => 'Int', default => 30);
-#has protobuf_struct => (is =>'rw', lazy_build => 1);
 
 =head1 PUBLIC FUNCTIONS
 
@@ -291,7 +290,7 @@ Perform a force database update.
 
 Return the time of next hope to update db
 
-Be careful if you call this method as noo frequent updates might result in the blacklisting of your API key.
+Be careful if you call this method as too frequent updates might result in the blacklisting of your API key.
 
 Arguments
 
@@ -952,9 +951,7 @@ sub parse_data {
     # читаем побайтно данные из $data (выдергивая их)
     while (length $data > 0) {
         $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
-        say Dumper($self->protobuf_struct);
-        $protobuf_data = $self->protobuf_struct->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
-        #$protobuf_data = ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+        $protobuf_data = ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
 
 	# perl hash format of decoded protobuf data is 
 	# (~ - for optional fields. they're available throught accessor):
@@ -1452,43 +1449,42 @@ sub request_full_hash {
 	return;
 }
 
-#sub _build_protobuf_struct {
-#    Google::ProtocolBuffers->parse("
-#        message ChunkData {
-#            required int32 chunk_number = 1;
-#
-#            // The chunk type is either an add or sub chunk.
-#            enum ChunkType {
-#                ADD = 0;
-#                SUB = 1;
-#            }
-#            optional ChunkType chunk_type = 2 [default = ADD];
-#
-#            // Prefix type which currently is either 4B or 32B.  The default is set
-#            // to the prefix length, so it doesn't have to be set at all for most
-#            // chunks.
-#         
-#            enum PrefixType {
-#                PREFIX_4B = 0;
-#                FULL_32B = 1;
-#            }
-#        
-#            optional PrefixType prefix_type = 3 [default = PREFIX_4B];
-#            // Stores all SHA256 add or sub prefixes or full-length hashes. The number
-#            // of hashes can be inferred from the length of the hashes string and the
-#            // prefix type above.
-#        
-#            optional bytes hashes = 4;
-#
-#            // Sub chunks also encode one add chunk number for every hash stored above.
-#        
-#            repeated int32 add_numbers = 5 [packed = true];
-#        }",
-#
-#        { create_accessors => 1 } 
-#    );    
-#    return ;
-#}
+#TODO include package name into class name
+Google::ProtocolBuffers->parse("
+    // ??? package AnyEvent::Net::SafeBrowsing3;
+    message ChunkData {
+        required int32 chunk_number = 1;
+
+        // The chunk type is either an add or sub chunk.
+        enum ChunkType {
+            ADD = 0;
+            SUB = 1;
+        }
+        optional ChunkType chunk_type = 2 [default = ADD];
+
+        // Prefix type which currently is either 4B or 32B.  The default is set
+        // to the prefix length, so it doesn't have to be set at all for most
+        // chunks.
+     
+        enum PrefixType {
+            PREFIX_4B = 0;
+            FULL_32B = 1;
+        }
+    
+        optional PrefixType prefix_type = 3 [default = PREFIX_4B];
+        // Stores all SHA256 add or sub prefixes or full-length hashes. The number
+        // of hashes can be inferred from the length of the hashes string and the
+        // prefix type above.
+    
+        optional bytes hashes = 4;
+
+        // Sub chunks also encode one add chunk number for every hash stored above.
+    
+        repeated int32 add_numbers = 5 [packed = true];
+    }",
+
+    { create_accessors => 1 } 
+);    
 
 no Mouse;
 __PACKAGE__->meta->make_immutable();
