@@ -66,8 +66,9 @@ function add_chunks_s(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k, rec in pairs(box.cjson.decode(json)) do
-		if not box.select(space, 0, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), tonumber(rec.chunk.host), rec.chunk.prefix) then
-			box.insert(space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), tonumber(rec.chunk.host), rec.chunk.prefix)
+--print( space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix)
+		if not box.select(space, 0, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix) then
+			box.insert(space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix)
 			ret=ret+1
 		end
 	end
@@ -78,8 +79,8 @@ function add_chunks_a(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
-		if not box.select(space, 0, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.host), rec.chunk.prefix) then
-			box.insert(space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.host), rec.chunk.prefix)
+		if not box.select(space, 0, rec.list, tonumber(rec.chunknum), rec.chunk.prefix) then
+			box.insert(space, rec.list, tonumber(rec.chunknum), rec.chunk.prefix)
 			ret=ret+1
 		end
 	end
