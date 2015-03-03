@@ -19,6 +19,7 @@ use Google::ProtocolBuffers;
 # FOR DEBUG ONLY
 use Data::Dumper;
 use feature qw(say);
+use utf8;
 
 our $VERSION = '1.01';
 
@@ -969,7 +970,7 @@ sub parse_data {
 	
 	if ($chunk_type == 0) {
             # it is add chunk
-	    my @data = parse_a_v3(value => $protobuf_data->hashes(), 
+	    my @data = $self->parse_a(value => $protobuf_data->hashes(), 
 			    hash_length => $hash_length);
 	    foreach my $item (@data) {
 	        push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };	
@@ -977,10 +978,10 @@ sub parse_data {
 	}
 	elsif ($chunk_type == 1) {
 	    # it is sub chunk
-	    my @data = parse_s_v3( value => $protobuf_data->hashes(), 
-                               hash_length => $hash_length,
-                               add_chunknum => \$protobuf_data->add_numbers() );
+	    my @data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
+            say Dumper("data of s type", \@data);
             foreach my $item (@data) {
+                #say Dumper("bulk data", { chunknum => $chunk_num, chunk => $item, list => $list });
         	push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };	
             }
 	}
@@ -991,7 +992,8 @@ sub parse_data {
 	    return;
 	} 
         # OLD: log_debug1("$type$chunk_num:$hash_length:$chunk_length OK");
-	log_debug1(join "", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len OK");
+        #TODO remove "in ...." from log_debug
+	log_debug1(join "", "(in parse_data()) ", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len OK");
     }
 
     my $in_process = 0; # сколько хранилищ (add, sub) обновляется
@@ -1017,8 +1019,83 @@ sub parse_data {
     return;
 }
 
-#===================================
+=head2 parse_s
 
+# -------------------------------------------------------------------------------
+# разбирает значения префиксов из protobuf структуры для добавления в базу sub
+# parse_s_v3(
+#    value => encoded_hashes,
+#    add_chunknums => $@add_numbers,
+#    hash_length => 4) # 4 or 32
+#
+# TODO what's better to pass: reference or hash
+#
+# OUTPUT: @data =( {add_chunknum => 123456, prefix => hash1}, {add_chunknum => 456123, prefix => hash2}, ...)
+# -------------------------------------------------------------------------------
+
+=cut
+
+sub parse_s {
+	my ($self, %args)  = @_;
+	my $value          = $args{value}          or return ();      
+	my $add_chunknums  = $args{add_chunknums}  or return (); 
+	my $hash_length    = $args{hash_length};
+	
+	# нужно установить соответствие между декодируемыми хэшами и номерами add-чанков из массива $add_chunknums
+       	
+        # ======== DEBUG ==============================
+        log_debug1("in parse_s()");
+        say "ref is: ", ref $add_chunknums;
+	
+        if (scalar(@$add_chunknums) != length($value)/$hash_length) {
+                log_error("Incorrect number of add-chunks");
+		return ();
+	}
+        # ======== DEBUG ==============================
+	
+	my @data = ();
+	
+	foreach my $add_chunknum (@$add_chunknums) {
+		my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
+		push(@data, { add_chunknum => $add_chunknum, prefix => $prefix });
+                log_debug1("(in parse_s()) s : $add_chunknum : $prefix ADDED");
+                # TODO логгирование: log_debug1("$add_chunknum $prefix");
+	}
+        say Dumper("in parse_s Dumper", \@data);
+
+	return @data;
+}
+
+
+=head parse_a
+# -------------------------------------------------------------------------------
+# разбирает значения префиксов из protobuf структуры для добавления в базу add
+# parse_a_v3(
+#    value => encoded_hashes,  # = hashes
+#    hash_length => 4)         # = prefix_type, 4 or 32
+# OUTPUT: @data = (hash1, hash2, hash3, ...)
+# -------------------------------------------------------------------------------
+=cut
+
+sub parse_a (%) {
+	my ($self, %args)  = @_;
+	my $value          = $args{value}         or return ();
+	my $hash_length    = $args{hash_length}; 
+	
+	my @data = (); # данные для загрузки в базу. одноуровневый массив вида @data = (hash1, hash2, hash3, ...)
+	
+	while (length $value > 0) {
+		my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
+		push @data, { prefix => $prefix };
+                log_debug1("(in parse_a()) a : $prefix ADDED");
+		# TODO логгирование: log_debug1($host." ".$prefix); # old version. now no $host
+    }
+
+	return @data;
+}
+
+
+=rem
 sub parse_data_v2 {
 	my ($self, %args) 	= @_;
 	my $data			= $args{data}		 || '';
@@ -1056,6 +1133,12 @@ sub parse_data_v2 {
 				$cb->(1);
 				return;
 			}
+				log_error("Incorrect chunk type: $type, should be a: or s:");
+				$cb->(1);
+				return;
+			}
+				return;
+			}
 			log_debug1("$type$chunk_num:$hash_length:$chunk_length OK");
 		}
 		else {
@@ -1082,14 +1165,15 @@ sub parse_data_v2 {
 	$self->storage->add_chunks_a($bulk_insert_a, $watcher) if @$bulk_insert_a;
 	return ;
 }
+=cut
 
-=head2 parse_s()
+=head2 parse_s_v2()
 
 Parse s chunks information for a database update.
 
 =cut
 
-sub parse_s {
+sub parse_s_v2 {
 	my ($self, %args) 	= @_;
 	my $value 			= $args{value}			|| return ();
 	my $hash_length 	= $args{hash_length}	|| 4;
@@ -1123,13 +1207,13 @@ sub parse_s {
 }
 
 
-=head2 parse_a()
+=head2 parse_a_v2()
 
 Parse a chunks information for a database update.
 
 =cut
 
-sub parse_a {
+sub parse_a_v2 {
 	my ($self, %args)  = @_;
 	my $value          = $args{value}       || return ();
 	my $hash_length    = $args{hash_length} || 4;
@@ -1451,11 +1535,10 @@ sub request_full_hash {
 
 #TODO include package name into class name
 Google::ProtocolBuffers->parse("
-    // ??? package AnyEvent::Net::SafeBrowsing3;
     message ChunkData {
         required int32 chunk_number = 1;
 
-        // The chunk type is either an add or sub chunk.
+         // The chunk type is either an add or sub chunk.        
         enum ChunkType {
             ADD = 0;
             SUB = 1;

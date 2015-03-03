@@ -2,5 +2,6 @@
 share/init.lua
 test_update.pl
 *.log
+*.xlog
 share/safe_browsing_box.pid
 *.swp
