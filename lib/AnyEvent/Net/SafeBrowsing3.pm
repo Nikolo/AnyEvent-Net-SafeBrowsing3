@@ -952,7 +952,7 @@ sub parse_data {
     # читаем побайтно данные из $data (выдергивая их)
     while (length $data > 0) {
         $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
-        $protobuf_data = ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+        $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
 
 	# perl hash format of decoded protobuf data is 
 	# (~ - for optional fields. they're available throught accessor):
@@ -1535,6 +1535,7 @@ sub request_full_hash {
 
 #TODO include package name into class name
 Google::ProtocolBuffers->parse("
+    package any_event.net.safe_browsing3;
     message ChunkData {
         required int32 chunk_number = 1;
 
