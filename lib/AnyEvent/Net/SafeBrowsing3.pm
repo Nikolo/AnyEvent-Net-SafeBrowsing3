@@ -801,82 +801,6 @@ sub local_lookup {
 
 }
 
-=head2 get_mac_keys()
-
-Request the Message Authentication Code (MAC) keys
-
-=cut
-
-sub get_mac_keys {
-	my ($self, $cb) = @_;
-	my $keys = $self->data->get('mac_keys');
-	if ($keys->{client_key} eq '' || $keys->{wrapped_key} eq '') {
-		$self->request_mac_keys(sub{
-			my ($client_key, $wrapped_key) = @_;
-			$self->data->set('mac_keys', {client_key => $client_key, wrapped_key => $wrapped_key});
-			$cb->($client_key, $wrapped_key);
-		});
-	}
-	else{
-		$cb->($keys->{client_key}, $keys->{wrapped_key});
-	}
-	return;
-}
-
-=head2 delete_mac_keys()
-
-Request the Message Authentication Code (MAC) keys
-
-=cut
-
-sub delete_mac_keys {
-	my ($self, $cb) = @_;
-	$self->data->set('mac_keys', {});
-	return;
-}
-
-
-=head2 request_mac_keys()
-
-Request the Message Authentication Code (MAC) keys.
-
-=cut
-
-sub request_mac_keys {
-	my ($self, $cb) = @_;
-	my $client_key = '';
-	my $wrapped_key = '';
-	my $url = $self->mac_server."newkey?client=api&apikey=".$self->key."&appver=$VERSION&pver=".$self->version;
-	debug1( "Url for get keys: ".$url );
-	http_get($url, %{$self->param_for_http_req}, sub {
-		my ($data, $headers) = @_; 
-		if( $headers->{Status} == 200 ){
-			if ($data =~ s/^clientkey:(\d+)://mi) {
-				my $length = $1;
-				rog_debug1("MAC client key length: $length");
-				$client_key = substr($data, 0, $length, '');
-				log_debug2("MAC client key: $client_key");
-				substr($data, 0, 1, ''); # remove 
-				if ($data =~ s/^wrappedkey:(\d+)://mi) {
-					$length = $1;
-					log_debug1("MAC wrapped key length: $length");
-					$wrapped_key = substr($data, 0, $length, '');
-					log_debug2("MAC wrapped key: $wrapped_key");
-					$cb->(decode_base64($client_key), $wrapped_key);
-				}
-				else {
-					$cb->('', '');
-				}
-			}
-		}
-		else {
-			log_error("Key request failed: " . $headers->{Status});
-			$cb->('', '');
-		}
-	});
-	return;
-}
-
 =head2 update_error()
 
 Handle server errors during a database update.
@@ -1533,7 +1457,6 @@ sub request_full_hash {
 	return;
 }
 
-#TODO include package name into class name
 Google::ProtocolBuffers->parse("
     package any_event.net.safe_browsing3;
     message ChunkData {
