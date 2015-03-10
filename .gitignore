@@ -1,6 +1,7 @@
 *.snap
 share/init.lua
 test_update.pl
+test_lookup.pl
 *.log
 *.xlog
 share/safe_browsing_box.pid

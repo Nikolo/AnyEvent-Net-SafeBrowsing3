@@ -129,7 +129,7 @@ sub BUILD {
 						fields => ['list', 'chunknum'],
 					},
 					2 => {
-						name => 'idx_a_list_host',
+						name => 'idx_a_list_prefix',
 						fields => ['list', 'prefix'],
 					},
 				},
@@ -147,6 +147,10 @@ sub BUILD {
 						name => 'idx_s_list_num',
 						fields => ['list', 'chunknum'],
 					},
+                                        2 => {
+						name => 'idx_s_list_prefix',
+						fields => ['list', 'prefix'],
+					},
 				},
 			},
 			$self->full_hashes_space() => {
@@ -161,6 +165,10 @@ sub BUILD {
 					1 => {
 						name => 'idx_s_list_num',
 						fields => ['list', 'chunknum'],
+					},
+                                        2 => {
+						name => 'idx_s_list_hash',
+						fields => ['list', 'hash'],
 					},
 				}
 			},
