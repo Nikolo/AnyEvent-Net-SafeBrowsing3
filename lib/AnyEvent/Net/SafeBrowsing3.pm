@@ -1198,42 +1198,95 @@ Find all canonical domains a domain.
 =cut
 
 sub canonical_domain {
-	my ($self, $domain) 	= @_;
-	my @domains = ($domain);
-	if ($domain =~ /^\d+\.\d+\.\d+\.\d+$/) { # loose check for IP address, should be enough
-		return @domains;
-	} 
-	my @parts = split/\./, $domain;
-	splice(@parts, 0, -6); # take 5 top most compoments
-	while (scalar @parts > 2) {
-		shift @parts;
-		push(@domains, join(".", @parts) );
-	}
-	return @domains;
+    my ($self, $domain) 	= @_;
+	
+    # requirements
+    #
+    #   PREPARE DOMAIN:
+    # 1. Remove all leading and trailing dots.
+    # 2. Replace consecutive dots with a single dot.
+    # 3. If the hostname can be parsed as an IP address, normalize it to 4 dot-separated decimal values. 
+    # The client should handle any legal IP- address encoding, including octal, hex, and fewer than 4 components.
+    # see: http://habrahabr.ru/post/69587/
+    # example: Canonicalize("http://3279880203/blah") => "http://195.127.0.11/blah";
+    # TODO according to policy	???
+    # 4. Lowercase the whole string.
+    # (it's just lowercased by URI->host)
+    # 
+    #   CREATE A LIST OF DOMAIN VARIANTS:
+    # @domains contains:
+    # 1. the exact hostname in the URL
+    # 2. up to 4 hostnames formed by starting with the last 5 components and successively removing the leading component.
+	
+    $domain =~ s<^\.*([^.].*[^.])\.*$><$1>; # prepare 1
+    $domain =~ s<\.{2,}><\.>g;              # prepare 2
+	
+    my @domains = ($domain);
+    if ($domain =~ /^\d+\.\d+\.\d+\.\d+$/) { # loose check for IP address, should be enough
+        return @domains;
+    } 
+
+    push(@domains, $domain) if ($domain =~ s/^(.*)\.  (([^.]+\.){4}  [^.]+) $/$2/x);
+    
+    while ($domain =~ s/^[^.]+\.(.*)$/$1/ and $domain =~ /\./) {
+    	push @domains, $domain;
+    };
+    
+    return @domains;
 }
+
+
 
 =head2 canonical_path()
 
 Find all canonical paths for a URL.
+input param: uri->path_query
+example: /1/2.html?param=1
+(with leading slash)
 
 =cut
 
 sub canonical_path {
-	my ($self, $path) 	= @_;
-	my @paths = ($path); # return full path
-	if ($path =~ /\?/) {
-		$path =~ s/\?.*$//;
-		push(@paths, $path);
-	}
-	my @parts = split /\//, $path;
-	my $previous = '';
-	while (scalar @parts > 1 && scalar @paths < 6) {
-		my $val = shift(@parts);
-		$previous .= "$val/";
+    my ($self, $path_query) 	= @_;
+	
+    # requirement
+    #
+    #   PREPARE PATH
+    # 1. replace "/./" with "/", 
+    # 2. Replace runs of consecutive slashes with a single slash character.
+    # 3. remove "/../" along with the preceding path component.	
+    # Do not apply path canonicalizations to the query parameters.
+    #
+    #   CREATE A LIST OF PATH VARIANTS
+    # 1. the exact path of the URL, including query parameters
+    # 2. the exact path of the URL, without query parameters
+    # 3. the 4 paths formed by starting at the root (/) and successively appending path components, including a trailing slash.
+	
+    my ($path, $query) = split('\?', $path_query); 
+	
+    my $path_orig = $path;
+    $path =~ s</\./></>g;     # prepare 1
+    $path =~ s<\/{2,}><\/>g;  # prepare 2
+    $path =~ s<^.*/\.\./><>g; # prepare 3
 
-		push(@paths, $previous);
-	}
-	return @paths;
+    $path =~ s<^\/><>;
+	
+    my @paths = ($path, '');
+    push @paths, "$path?$query" if $query;
+	
+    my $prev = '';
+
+    for (my $i = 0; $i < 4; ++$i) {
+        last if $path eq '';
+        if ($path =~ s<^ ([^/]+)  (\/)? ><>x) {
+            my $curr = defined($2) ? "$1$2" : $1; 
+            last if !defined($curr);
+    	    $prev .= "$curr";
+            push @paths, $prev if ($prev ne $path_orig);
+        } 
+    }
+    
+    return @paths;
 }
 
 =head2 canonical()
