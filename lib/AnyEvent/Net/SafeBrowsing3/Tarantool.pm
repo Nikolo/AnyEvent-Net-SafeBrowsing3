@@ -229,12 +229,19 @@ sub delete_sub_chunks {
 	return;
 }
 
+# select tuples from a_chunks using index2 (list + prefix)
+# in callback returns reference to array of fields:
+# (list, chunknum, prefix)
+# $ret = [ {list => res1_list, chunknum => res1_chunknum, prefix => res1_prefix},
+#          {list => res2_list, chunknum => res2_chunknum, prefix => res2_prefix},
+#          ..... ]
 sub get_add_chunks {
 	my ($self, %args) = @_;
-	my $hostkey       = $args{hostkey}                           || die "hostkey arg is required";
-	my $list          = $args{'lists'}                           || die "lists arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('a_chunks', [map [$_,$hostkey], @$list], {index => 2}, sub{
+	my $prefix        = $args{prefix}                            or die "prefix arg is required";
+	my $list          = $args{'lists'}                           or die "lists arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	
+	$self->dbh->slave->select('a_chunks', [map [$_, $prefix], @$list], {index => 2}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -252,12 +259,18 @@ sub get_add_chunks {
 	return;
 }
 
+# select tuples from s_chunks using index2 (list + prefix)
+# in callback returns reference to array of fields:
+# (list, chunknum, add_num, prefix)
+# $ret = [ {list => res1_list, chunknum => res1_chunknum, add_num => res1_add_num, prefix => res1_prefix},
+#          {list => res2_list, chunknum => res2_chunknum, add_num => res2_add_num, prefix => res2_prefix},
+#          ..... ]
 sub get_sub_chunks {
 	my ($self, %args) = @_;
-	my $hostkey       = $args{hostkey}                           || die "hostkey arg is required";
-	my $list          = $args{'lists'}                           || die "lists arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('s_chunks', [map [$_,$hostkey], @$list], {index => 2}, sub{
+	my $prefix        = $args{prefix}                            or die "prefix arg is required";
+	my $list          = $args{'lists'}                           or die "lists arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->slave->select('s_chunks', [map [$_,$prefix], @$list], {index => 2}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;

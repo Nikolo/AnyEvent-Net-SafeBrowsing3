@@ -655,74 +655,37 @@ sub lookup_suffix {
 	return;
 }
 
-=head2 lookup_suffix()
+=head2 local_lookup_suffix()
 
-Lookup a host prefix in the local database only.
+Lookup a prefix in the local database only.
 
 =cut
 
 sub local_lookup_suffix {
-	my ($self, %args) 			= @_;
-	my $lists 					= $args{lists} 				|| croak "Missing lists";
-	my $url 					= $args{url}				|| return ();
-	my $suffix					= $args{suffix}				|| return ();
-	my $full_hashe_list 		= $args{full_hashes}		|| [];
-	my $full_hashes_prefix_list = $args{full_hashes_prefix} || [];
-	my $cb                      = $args{cb}                 || die "Callback is required";
+	my ($self, %args) 	= @_;
+	my $lists 		= $args{lists} 		or croak "Missing lists";
+	my $prefix		= $args{prefix}		or return ();
+	my $cb                  = $args{cb}             or die "Callback is required";
 
-	# Step 1: get all add chunks for this host key
+	# Step 1: get all add chunks for this prefix 
 	# Do it for all lists
-	$self->storage->get_add_chunks(hostkey => $suffix, lists => $lists, cb => sub {
+	$self->storage->get_add_chunks(prefix => $prefix, lists => $lists, cb => sub {
 		my $add_chunks = shift;
 		unless( scalar @$add_chunks ){
 			$cb->([]); 
 			return;
 		}
-		# Step 2: calculcate prefixes
-		# Get the prefixes from the first 4 bytes
-		my @full_hashes_prefix = @{$full_hashes_prefix_list};
-		if (scalar @full_hashes_prefix == 0) {
-			my @full_hashes = @{$full_hashe_list};
-			@full_hashes = $self->full_hashes($url) if (scalar @full_hashes == 0);
-
-			@full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
-		}
-		# Step 3: filter out add_chunks with prefix
-		my $i = 0;
-		while ($i < scalar @$add_chunks) {
-			if ($add_chunks->[$i]->{prefix} ne '') {
-				my $found = 0;
-				foreach my $hash_prefix (@full_hashes_prefix) {
-					if ( $add_chunks->[$i]->{prefix} eq unpack( 'H*', $hash_prefix)) {
-						$found = 1;
-						last;
-					}
-				}
-				if ($found == 0) {
-					log_debug2("No prefix found");
-					splice(@$add_chunks, $i, 1);
-				}
-				else {
-					$i++;
-				}
-			}
-			else {
-				$i++;
-			}
-		}
-		unless( scalar @$add_chunks ){
-			$cb->([]); 
-			return;
-		}
-		# Step 4: get all sub chunks for this host key
+		
+		# Step 2: get all sub chunks for this host key
 		$self->storage->get_sub_chunks(hostkey => $suffix, lists => $lists, cb => sub {
 			my $sub_chunks = shift;
+                        # Step 3: filter out add_chunks with sub_chunks 
 			foreach my $sub_chunk (@$sub_chunks) {
 				my $i = 0;
 				while ($i < scalar @$add_chunks) {
 					my $add_chunk = $add_chunks->[$i];
 
-					if ($add_chunk->{chunknum} != $sub_chunk->{addchunknum} || $add_chunk->{list} ne $sub_chunk->{list}) {
+					if ($add_chunk->{chunknum} != $sub_chunk->{add_num} || $add_chunk->{list} ne $sub_chunk->{list}) {
 						$i++;
 						next;
 					}
