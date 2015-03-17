@@ -355,14 +355,14 @@ sub add_chunks_a {
 
 sub add_full_hashes {
 	my ($self, %args) 	= @_;
-	my $full_hashes   = $args{full_hashes}                       || die "full_hashes arg is required";
-	my $timestamp     = $args{timestamp}                         || die "timestamp arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
+	my $full_hashes   = $args{full_hashes}                       or die "full_hashes arg is required";
+	my $timestamp     = $args{timestamp}                         or die "timestamp arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
 
 	my $inserted = 0;
 	my $err = 0;
 	foreach my $fhash (@$full_hashes) {
-		$self->dbh->master->insert('full_hashes', [$fhash->{list}, $fhash->{chunknum}, $fhash->{hash}, $timestamp], sub {
+		$self->dbh->master->insert('full_hashes', [$fhash->{list}, $fhash->{hash}, $timestamp], sub {
 			my ($result, $error) = @_;
 			log_error( "Tarantool error: ".$error ) if $error;
 			$inserted++;
