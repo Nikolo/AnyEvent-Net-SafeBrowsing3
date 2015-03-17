@@ -1070,29 +1070,6 @@ sub parse_a (%) {
 	return @data;
 }
 
-=head2 canonical_domain_suffixes()
-
-Find all suffixes for a domain.
-
-=cut
-
-sub canonical_domain_suffixes {
-	my ($self, $domain) 	= @_;
-	my @domains = ();
-	if ($domain =~ /^\d+\.\d+\.\d+\.\d+$/) { # loose check for IP address, should be enough
-		return ($domain);
-	} 
-	my @parts = split/\./, $domain; # take 3 components
-	if (scalar @parts >= 3) {
-		@parts = splice (@parts, -3, 3);
-		push(@domains, join('.', @parts));
-		splice(@parts, 0, 1);
-	}
-	push(@domains, join('.', @parts));
-	return @domains;
-}
-
-
 =head2 canonical_domain()
 
 Find all canonical domains a domain.
@@ -1313,17 +1290,6 @@ sub full_hashes {
 	}
 
 	return @hashes;
-}
-
-=head2 prefix()
-
-Return a hash prefix. The size of the prefix is set to 4 bytes.
-
-=cut
-
-sub prefix {
-	my ($self, $string) = @_;
-	return sha256($string);
 }
 
 =head2 request_full_hash()
