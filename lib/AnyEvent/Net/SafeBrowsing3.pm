@@ -368,7 +368,7 @@ sub lookup {
     # TODO rename suffix to prefix
     
     foreach my $prefix (@full_hashes_prefix) {
-        $self->local_lookup_suffix(lists => $lists, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
+        $self->local_lookup_prefix(lists => $lists, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
 			my $add_chunks = shift;
 			unless( scalar @$add_chunks ){
 				$cb->();
@@ -656,7 +656,7 @@ sub lookup_suffix {
 	my @full_hashes = $self->full_hashes($url); # Get the prefixes from the first 4 bytes
 	my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
  	# Local lookup
-	$self->local_lookup_suffix(lists => $lists, url => $url, suffix => $suffix, full_hashes_prefix => [@full_hashes_prefix], cb => sub {
+	$self->local_lookup_prefix(lists => $lists, url => $url, suffix => $suffix, full_hashes_prefix => [@full_hashes_prefix], cb => sub {
 		my $add_chunks = shift;
 		unless( scalar @$add_chunks ){
 			$cb->();
@@ -742,13 +742,13 @@ sub lookup_suffix {
 	return;
 }
 
-=head2 local_lookup_suffix()
+=head2 local_lookup_prefix()
 
 Lookup a prefix in the local database only.
 
 =cut
 
-sub local_lookup_suffix {
+sub local_lookup_prefix {
 	my ($self, %args) 	= @_;
 	my $lists 		= $args{lists} 		or croak "Missing lists";
 	my $prefix		= $args{prefix}		or return ();
@@ -846,7 +846,7 @@ sub local_lookup {
     # TODO rename suffix to prefix
     
     foreach my $prefix (@full_hashes_prefix) {
-        my @matches = $self->local_lookup_suffix(lists => [@lists], prefix => sprintf("%x", unpack('N', $prefix)), cb => sub { return @{+shift}; });
+        my @matches = $self->local_lookup_prefix(lists => [@lists], prefix => sprintf("%x", unpack('N', $prefix)), cb => sub { return @{+shift}; });
         return $matches[0]->{list} . " " . $matches[0]->{prefix} if (scalar @matches > 0);
     }
 
