@@ -1395,7 +1395,7 @@ IN:
 - ref to array of hash-prefixes (returned by local_lookup) in binary
 - cb
 OUT to cb: 
-- list of full hashes [ {list => listname1, hash => hash1},  {list => listname2, hash => hash2} ]
+- list of full hashes [ {list => listname1, hash => hash1, timestamp => valid_to1},  {list => listname2, hash => hash2, timestamp => valid_to2} ]
 
 =cut
 
@@ -1480,7 +1480,7 @@ sub request_full_hash {
 			}
 			my $cache_lifetime = $1;
 			substr($data, 0, length($cache_lifetime."\n"), '');
-			#TODO put this time in database
+                        my $valid_to = $self->cache_time ? time() + $self->cache_time : time() + $cache_lifetime;
 			
 			# 2) handle empty answer
 			if ($data eq '') {
@@ -1513,7 +1513,7 @@ sub request_full_hash {
 			    # 5) unpack hashes (binary). length of each hash = $hash_size
 			    for (my $i = 0; $i < $num_responses; ++$i) {
 			        my $hash = substr($data, 0, $hash_size, ''); # кусаем байты!
-			        push(@hashes, { hash => $hash, list => $list });
+			        push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
 			    }
 			    
 			    # 6) unpack metadata (2\nAA3\nBBBnext_text)
