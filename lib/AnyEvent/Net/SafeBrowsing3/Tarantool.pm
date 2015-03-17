@@ -301,13 +301,16 @@ sub delete_full_hashes {
 	return;
 }
 
+# searches full hashes by prefix (4 byte)
+# if found hash with expired date, remove it from database
 sub get_full_hashes {
 	my ($self, %args) = @_;
-	my $chunknum      = $args{chunknum}                          || die "chunknum arg is required";
-	my $list          = $args{'list'}                            || die "lists arg is required";
-	my $timestamp     = $args{'timestamp'}                       || die "timestamp arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('full_hashes', [[$list,$chunknum]], {index => 1}, sub{
+	my $prefix     = $args{'prefix'}                             or die "prefix arg is required";
+	my $list          = $args{'list'}                            or die "lists arg is required";
+	my $timestamp     = $args{'timestamp'}                       or die "timestamp arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	
+	$self->dbh->slave->select('full_hashes', [[$list,$prefix]], {index => 0}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -316,9 +319,10 @@ sub get_full_hashes {
 		else {
 			my $space = $self->dbh->master->{spaces}->{full_hashes};
 			my $ret = [];
+			
 			foreach my $tup ( @{$result->{tuples}} ){
 				if( $tup->[$space->{fast}->{timestamp}->{no}] < $timestamp ){
-					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1], $tup->[2]], sub {
+					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1]], sub {
 						my ($result, $error) = @_;
 						log_error( "Tarantool error: ".$error ) if $error;
 					});
