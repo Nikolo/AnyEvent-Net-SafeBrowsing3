@@ -1254,7 +1254,7 @@ sub canonical_path {
 
 =head2 canonical()
 
-Find all canonical URLs for a URL.
+Find all possible combinations of domain + path  for a given URL.
 
 =cut
 
@@ -1266,7 +1266,7 @@ sub canonical {
 	my @paths = $self->canonical_path($uri->path_query);
 	foreach my $domain (@domains) {
 		foreach my $path (@paths) {
-			push(@urls, "$domain$path");
+			push(@urls, "$domain\/$path");
 		}
 	}
 	return @urls;
@@ -1389,15 +1389,21 @@ sub prefix {
 
 =head2 request_full_hash()
 
-Request full full hashes for specific prefixes from Google.
+Request full hashes for specific prefixes from Google.
+
+IN: 
+- ref to array of hash-prefixes (returned by local_lookup) in binary
+- cb
+OUT to cb: 
+- list of full hashes [ {list => listname1, hash => hash1},  {list => listname2, hash => hash2} ]
 
 =cut
 
 sub request_full_hash {
 	my ($self, %args) 	= @_;
-	my $prefixes		= $args{prefixes}; ref $prefixes eq 'ARRAY'	|| die "Arg prefixes is required and must be arrayref";
-	my $cb              = $args{cb}                                 || die "Args cb is required";
-	my $size			= length $prefixes->[0];
+	my $prefixes		= $args{prefixes}; ref $prefixes eq 'ARRAY'	or die "Arg prefixes is required and must be arrayref";
+	my $cb                  = $args{cb}                                     or die "Args cb is required";
+	my $size		= length $prefixes->[0];
 # 	# Handle errors
 	my $i = 0;
 	my $errors;
@@ -1410,9 +1416,10 @@ sub request_full_hash {
 			$i++;
 		}
 	};
+	
 	while ($i < scalar @$prefixes) {
 		my $prefix = $prefixes->[$i];
-
+        
 		$errors = $self->data->get('full_hash_errors/'.unpack( 'H*', $prefix));
 		if (defined $errors && $errors->{errors} > 2) { # 2 errors is OK
 			$errors->{errors} == 3 ? $delay->(30 * 60) # 30 minutes
@@ -1423,41 +1430,106 @@ sub request_full_hash {
 			$i++;
 		}
 	}
-
-	my $url = $self->server . "gethash?client=api&apikey=" . $self->key . "&appver=$VERSION&pver=" . $self->version;
+	
+	# request URL
+	my $url = $self->server . "gethash?client=api&key=" . $self->key . "&appver=$VERSION&pver=" . $self->version;
 	log_debug1( "Full hash url: ". $url);
-
+	
+	# request body
+	# example:
+	#     4:12          => size_of_each_prefix_in_bytes ":" total_length_of_prefixes_in_bytes
+	#     123456781234  => chain of prefixes in binary
+	
 	my $prefix_list = join('', @$prefixes);
 	my $header = "$size:" . scalar @$prefixes * $size;
 	my $body = $header."\n".$prefix_list;
 	log_debug1( "Full hash data: ". $body);
+	
 	http_post( $url, $body, %{$self->param_for_http_req}, sub {
 		my ($data, $headers) = @_; 
 		if( $headers->{Status} == 200 && length $data){
 			log_debug1("Full hash request OK");
 			log_debug3("Response body: ".$data);
 			$self->data->delete('full_hash_errors/'.unpack( 'H*', $_ )) for @$prefixes;
+			
+			# parse response 
+			# example 1:
+			#    900                                                                  => CACHELIFETIME (in seconds)
+                        #    goog-malware-shavar:32:2:m                                           => LISTNAME ":" HASHSIZE ":" NUMRESPONSES [":m"] 
+                        #    01234567890123456789012345678901987654321098765432109876543210982    => HASHDATA_BINARY [METADATALEN 
+                        #    AA3                                                                  => METADATA_BINARY]*
+                        #    BBBgoogpub-phish-shavar:32:1
+                        #    99998888555544447777111122225555
+                        #
+                        # example 2:
+                        #    600
+                        #    googpub-phish-shavar:32:1
+                        #    01234567890123456789012345678901
+                        #
+                        # example 3:
+                        #    900	
+			# ------------------
 			my @hashes = ();
-
-			# goog-malware-shavar:22428:32HEX
-			while (length $data > 0) {
-				if ($data !~ /^([a-z\-]+):(\d+):(\d+)/) {
-					log_error("list not found");
-					$cb->([]);
-					return;
-				}
-				my ( $list, $chunknum, $length) = ($1, $2, $3);
-				substr($data,0,length($list.":".$chunknum.":".$length."\n"),'');
-				my $current = 0;
-				while ($current < $length) {
-					my $hash = substr($data, 0, 32, '');
-					push(@hashes, { hash => $hash, chunknum => $chunknum, list => $list });
-
-					$current += 32;
-				}
+			# my @metadata = ();
+			
+			# 1) разобрать CACHELIFETIME  (900)
+			if ($data !~ /^(\d+)/) {
+				log_error("error in parsing full hash response");
+				$cb->([]);
+				return;
 			}
-
-			$cb->(\@hashes);
+			my $cache_lifetime = $1;
+			substr($data, 0, length($cache_lifetime."\n"), '');
+			#TODO put this time in database
+			
+			# 2) handle empty answer
+			if ($data eq '') {
+				log_debug1("No full hashes matched the given prefix");
+				# TODO memorize it for CACHELIFETIME seconds
+				$cb->([]);
+				return;
+			}
+			
+			while (length $data > 0) {
+				# 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
+			    if ($str !~ /^([a-z\-]+):(\d+):(\d+)/) {
+				    log_error("error in parsing full hash response");
+				    $cb->([]);
+				    return;
+			    }
+			    my ($list, $hash_size, $num_responses) = ($1, $2, $3);
+			    substr($data, 0, length($list.":".$hash_size.":".$num_responses),'');
+			    
+			    # 4) check if there is metadata  
+			    my $has_meta = 0;
+			    if ($str =~ /^:m/) {
+			        $has_meta = 1;
+			        substr($data, 0, length(":m\n"),'');        
+			    }
+			    else {
+			    	substr($data, 0, length("\n"),''); 
+			    }
+			    
+			    # 5) unpack hashes (binary). length of each hash = $hash_size
+			    for (my $i = 0; $i < $num_responses; ++$i) {
+			        my $hash = substr($data, 0, $hash_size, ''); # кусаем байты!
+			        push(@hashes, { hash => $hash, list => $list });
+			    }
+			    
+			    # 6) unpack metadata (2\nAA3\nBBBnext_text)
+			    # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, so this metadata isn't stored anywhere.
+			    if ($has_meta) {
+			    	while ($str =~ /^(\d+)/) {
+			    		my $meta_len = $1; 		
+			    		my $meta = substr($data, length($meta_len."\n"), $meta_len);
+			    		substr($data, 0,length($meta_len."\n".$meta), '');
+			    	    # push(@metadata, $meta);
+			    	}
+			    }
+			}
+			
+			$cb->(\@hashes);			
+			# ------------------
 		}
 		else {
 			log_error("Full hash request failed ".$headers->{Status} );
