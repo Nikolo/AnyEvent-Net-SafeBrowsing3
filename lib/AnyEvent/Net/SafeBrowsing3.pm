@@ -347,9 +347,9 @@ Required. Callback function that will be called after db is updated.
 
 sub lookup {
 	my ($self, %args) 	= @_;
-	my $list 			= $args{list}		|| die "List is required";
-	my $url 			= $args{url}		|| die "URL is required";
-	my $cb              = $args{cb}         || die "Callback is required";
+	my $list 			= $args{list}		or die "List is required";
+	my $url 			= $args{url}		or die "URL is required";
+	my $cb              = $args{cb}         or die "Callback is required";
 
 	# TODO: create our own URI management for canonicalization
 	# fix for http:///foo.com (3 ///)
@@ -357,24 +357,111 @@ sub lookup {
 
 	my $uri = URI->new($url)->canonical;
 	die "Bad url ".$url if $uri->scheme !~ /^https?$/;
-	my $domain = $uri->host;
-	my @hosts = $self->canonical_domain_suffixes($domain); # only top-3 in this case
-	my $processed = 0;
-	my $ret_matched = [];
-	my $watcher = sub {
-		my $match = shift;
-		push @$ret_matched, $match if $match;
-		$processed++;
-		if( $processed == @hosts ){
-			$cb->($ret_matched);
-		}
-	};
-	foreach my $host (@hosts) {
-		log_debug1("Domain for key: $domain => $host");
-		my $suffix = $self->prefix("$host/"); # Don't forget trailing hash
-		log_debug2("Host key: ".unpack( 'V', $suffix));
-		$self->lookup_suffix(lists => $list, url => $url, suffix => unpack( 'V', $suffix ), cb => $watcher);
-	}
+	
+	# compute full hashes (32b) and prefixes (4b) for all canonical combinations of URLs (domain + path). result data in binary
+	my @full_hashes = $self->full_hashes($uri);
+	my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
+	
+    # check if any prefix (4 bytes long) match with local database.
+    # prefix in match is a hex string (because prefixes are stored in databse like hex strings)
+    # returns a reference to list of add chunks to callback
+    # TODO rename suffix to prefix
+    
+    foreach my $prefix (@full_hashes_prefix) {
+        $self->local_lookup_suffix(lists => $lists, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
+			my $add_chunks = shift;
+			unless( scalar @$add_chunks ){
+				$cb->();
+				return;
+			}
+			
+			# if any prefix matches with local database, check for full hashes stored locally
+			# preliminary declarations
+			my $found = '';
+			my $processed = 0;
+			my $watcher = sub {
+				my $list = shift;
+				$found ||= $list if $list;  
+				$processed++;
+				if($processed == @$add_chunks){
+					if( $found ){
+						$cb->($found);
+					}
+					else {
+						log_debug2("No match");
+						$cb->();
+					}
+				}
+			};
+	
+			# get stored full hashes
+			# returns a reference to list of full hashes found to callback
+			foreach my $add_chunk (@$add_chunks) {
+				$self->storage->get_full_hashes( prefix => $add_chunk->{prefix}, timestamp => time(), list => $add_chunk->{list}, cb => sub {
+					my $hashes = shift;
+					if( @$hashes ){
+						log_debug2("Full hashes already stored for prefix " . $add_chunk->{prefix} . ": " . scalar @$hashes);
+						my $fnd = '';
+						log_debug1( "Searched hashes: ", \@full_hashes );
+						
+						# find match between our computed full hashes and full hashes retrieved from local database
+						foreach my $full_hash (@full_hashes) {
+							foreach my $hash (@$hashes) {
+								if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
+									log_debug2("Full hash was found in storage: ", $hash);
+									$fnd = $hash->{list};
+								}
+							}
+						}
+						$watcher->($fnd);
+					}
+					else {
+						# ask Google for new hashes
+						# TODO: make sure we don't keep asking for the same over and over
+						
+						$self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
+							my $hashes = shift;
+							log_debug1( "Full hashes: ", $hashes);
+							$self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
+							
+							# check for new full hashes
+							# preliminary declaration
+							$processed = 0;
+							$found = '';
+							my $watcher = sub {
+								my $list = shift;
+								$found ||= $list if $list;  
+								$processed++;
+								if($processed == @full_hashes){
+									if( $found ){
+										$cb->($found);
+									}
+									else {
+										$cb->();
+									}
+								}
+							};
+							
+							foreach my $full_hash (@full_hashes) {
+								my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
+								if (! defined $hash){
+									$watcher->();
+									next;
+								}
+	
+								my $list = first { $hash->{list} eq $_ } @$lists;
+	
+								if (defined $hash && defined $list) {
+									log_debug2("Match: $full_hash");
+									$watcher->($hash->{list});
+								}
+							}
+						});
+					}
+				});
+			}
+		});
+    }    
 	return;
 }
 
@@ -676,8 +763,8 @@ sub local_lookup_suffix {
 			return;
 		}
 		
-		# Step 2: get all sub chunks for this host key
-		$self->storage->get_sub_chunks(hostkey => $suffix, lists => $lists, cb => sub {
+		# Step 2: get all sub chunks for this prefix
+		$self->storage->get_sub_chunks(prefix => $prefix, lists => $lists, cb => sub {
 			my $sub_chunks = shift;
                         # Step 3: filter out add_chunks with sub_chunks 
 			foreach my $sub_chunk (@$sub_chunks) {
@@ -733,35 +820,37 @@ Required. Callback function that will be called after db is updated.
 =cut
 
 sub local_lookup {
-	my ($self, %args) 	= @_;
-	my $list 			= $args{list}		|| '';
-	my $url 			= $args{url}		|| return '';
+    my ($self, %args) 	= @_;
+    my $list 			= $args{list}		||  '';
+    my $url 			= $args{url}		or return '';
 
-	my @lists = @{$self->{list}};
-	@lists = @{[$args{list}]} if ($list ne '');
+    my @lists = @{$self->{list}};
+    @lists = @{[$args{list}]} if ($list ne '');
+    
+    # ================ new code ==========================
 
+    # TODO: create our own URI management for canonicalization
+    # fix for http:///foo.com (3 ///)
+    $url =~ s/^(https?:\/\/)\/+/$1/;
 
-	# TODO: create our own URI management for canonicalization
-	# fix for http:///foo.com (3 ///)
-	$url =~ s/^(https?:\/\/)\/+/$1/;
-
-	my $uri = URI->new($url)->canonical;
-
-	my $domain = $uri->host;
+    my $uri = URI->new($url)->canonical;
+    die "Bad url ".$url if $uri->scheme !~ /^https?$/;
 	
-	my @hosts = $self->canonical_domain_suffixes($domain); # only top-3 in this case
+    # compute full hashes (32b) and prefixes (4b) for all canonical combinations of URLs (domain + path). result data in binary
+    my @full_hashes = $self->full_hashes($uri);
+    my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
+	
+    # check if any prefix (4 bytes long) match with local database.
+    # prefix in match is a hex string (because prefixes are stored in databse like hex strings)
+    # returns a reference to list of add chunks to callback
+    # TODO rename suffix to prefix
+    
+    foreach my $prefix (@full_hashes_prefix) {
+        my @matches = $self->local_lookup_suffix(lists => [@lists], prefix => sprintf("%x", unpack('N', $prefix)), cb => sub { return @{+shift}; });
+        return $matches[0]->{list} . " " . $matches[0]->{prefix} if (scalar @matches > 0);
+    }
 
-	foreach my $host (@hosts) {
-		debug1("Domain for key: $domain => $host");
-		my $suffix = $self->prefix("$host/"); # Don't forget trailing hash
-		debug1("Host key: $suffix");
-
-		my @matches = $self->local_lookup_suffix(lists => [@lists], url => $url, suffix => $suffix);
-		return $matches[0]->{list} . " " . $matches[0]->{chunknum}  if (scalar @matches > 0);
-	}
-
-	return '';
-
+    return '';
 }
 
 =head2 update_error()
@@ -1357,7 +1446,7 @@ sub canonical_uri {
 	return URI->new($escape);
 }
 
-=head2 canonical()
+=head2 full_hashes()
 
 Return all possible full hashes for a URL.
 
@@ -1472,7 +1561,7 @@ sub request_full_hash {
 			my @hashes = ();
 			# my @metadata = ();
 			
-			# 1) разобрать CACHELIFETIME  (900)
+			# 1) unpack CACHELIFETIME  (900)
 			if ($data !~ /^(\d+)/) {
 				log_error("error in parsing full hash response");
 				$cb->([]);
@@ -1484,14 +1573,15 @@ sub request_full_hash {
 			
 			# 2) handle empty answer
 			if ($data eq '') {
-				log_debug1("No full hashes matched the given prefix");
-				# TODO memorize it for CACHELIFETIME seconds
+                                my $list = join (" | ", @$prefixes);
+				log_debug1("Empty answer for prefixlist ($list) for $cache_lifetime seconds");
+				# TODO store empty answers anywhere
 				$cb->([]);
 				return;
 			}
 			
 			while (length $data > 0) {
-				# 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
+	                   # 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
 			    if ($str !~ /^([a-z\-]+):(\d+):(\d+)/) {
 				    log_error("error in parsing full hash response");
 				    $cb->([]);
