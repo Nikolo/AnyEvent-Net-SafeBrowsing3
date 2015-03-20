@@ -404,7 +404,7 @@ sub lookup {
                    # find match between our computed full hashes and full hashes retrieved from local database
                    foreach my $full_hash (@full_hashes) {
                        foreach my $hash (@$hashes) {
-                           if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists {
+                           if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
                                log_debug2("Full hash was found in storage: ", $hash);
                                $fnd = $hash->{list};
                            }
