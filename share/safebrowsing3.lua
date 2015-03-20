@@ -4,9 +4,9 @@ local VERSION               = "1.0"
 -- Modules
 safebrowsing = safebrowsing or {}
 local safebrowsing = safebrowsing
-module('safebrowsing', package.seeall)
+module('safebrowsing3', package.seeall)
 
-function get_regions(space_a, space_s, list)
+function get_regions3(space_a, space_s, list)
 	local regions=""
 	local last_reg=0
 	local begin_range=0
@@ -62,7 +62,7 @@ function get_regions(space_a, space_s, list)
 	return regions
 end
 
-function add_chunks_s(space_num, json)
+function add_chunks_s3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k, rec in pairs(box.cjson.decode(json)) do
@@ -75,7 +75,7 @@ function add_chunks_s(space_num, json)
 	return ret
 end
 
-function add_chunks_a(space_num, json)
+function add_chunks_a3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
@@ -87,7 +87,7 @@ function add_chunks_a(space_num, json)
 	return ret
 end
 
-function del_chunks_s(space_num, json)
+function del_chunks_s3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
@@ -99,7 +99,7 @@ function del_chunks_s(space_num, json)
 	return ret
 end
 
-function del_chunks_a(space_num, json)
+function del_chunks_a3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
@@ -111,7 +111,7 @@ function del_chunks_a(space_num, json)
 	return ret
 end
 
-function del_full_hash(space_num, json)
+function del_full_hash3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
@@ -123,5 +123,5 @@ function del_full_hash(space_num, json)
 	return ret
 end
 
-print(safebrowsing._NAME .. " version " .. VERSION .. " loaded")
+print(safebrowsing3._NAME .. " version " .. VERSION .. " loaded")
 

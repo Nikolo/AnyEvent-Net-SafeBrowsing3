@@ -6,7 +6,7 @@ use Mouse;
 
 =head1 NAME
 
-AnyEvent::Net::SafeBrowsing3::Empty - Fake back-end storage for the Safe Browsing v2 database 
+AnyEvent::Net::SafeBrowsing3::Empty - Fake back-end storage for the Safe Browsing v3 database 
 
 =head1 SYNOPSIS
 
@@ -119,11 +119,11 @@ __PACKAGE__->meta->make_immutable();
 
 =head1 SEE ALSO
 
-See L<AnyEvent::Net::SafeBrowsing3> for handling Safe Browsing v2.
+See L<AnyEvent::Net::SafeBrowsing3> for handling Safe Browsing v3.
 
 See L<AnyEvent::Net::SafeBrowsing3::Storage> for the list of public functions.
 
-Google Safe Browsing v2 API: L<http://code.google.com/apis/safebrowsing/developers_guide_v2.html>
+Google Safe Browsing v3 API: L<https://developers.google.com/safe-browsing/developers_guide_v3>
 
 =head1 AUTHOR
 
@@ -131,7 +131,7 @@ Nikolay Shulyakovskiy, E<lt>shulyakovskiy@mail.ruE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2014 by Nikolay Shulyakovskiy
+Copyright (C) 2015 by Nikolay Shulyakovskiy
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,

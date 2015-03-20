@@ -10,7 +10,7 @@ extends 'AnyEvent::Net::SafeBrowsing3::Storage';
 
 =head1 NAME
 
-AnyEvent::Net::SafeBrowsing3::Tarantool - Tarantool as as back-end storage for the Safe Browsing v2 database 
+AnyEvent::Net::SafeBrowsing3::Tarantool - Tarantool as back-end storage for the Safe Browsing v3 database 
 
 =head1 SYNOPSIS
 
@@ -129,7 +129,7 @@ sub BUILD {
 						fields => ['list', 'chunknum'],
 					},
 					2 => {
-						name => 'idx_a_list_host',
+						name => 'idx_a_list_prefix',
 						fields => ['list', 'prefix'],
 					},
 				},
@@ -147,6 +147,10 @@ sub BUILD {
 						name => 'idx_s_list_num',
 						fields => ['list', 'chunknum'],
 					},
+                                        2 => {
+						name => 'idx_s_list_prefix',
+						fields => ['list', 'prefix'],
+					},
 				},
 			},
 			$self->full_hashes_space() => {
@@ -162,6 +166,10 @@ sub BUILD {
 						name => 'idx_s_list_num',
 						fields => ['list', 'chunknum'],
 					},
+                                        2 => {
+						name => 'idx_s_list_hash',
+						fields => ['list', 'hash'],
+					},
 				}
 			},
 		},
@@ -172,9 +180,9 @@ sub BUILD {
 
 sub get_regions {
 	my ($self, %args) = @_;
-	my $list          = $args{list}                          || die "list arg is required";
-	my $cb            = $args{cb}; ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.get_regions', [$self->a_chunks_space(), $self->s_chunks_space(), $list], {in => 'ppp', out => 'p'}, sub {
+	my $list          = $args{list}                          or die "list arg is required";
+	my $cb            = $args{cb}; ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->master->lua( 'safebrowsing3.get_regions3', [$self->a_chunks_space(), $self->s_chunks_space(), $list], {in => 'ppp', out => 'p'}, sub {
 		my ($data, $error) = @_;
 		if( $error ){
 			log_error( 'Tarantool error: '.$error );
@@ -197,10 +205,10 @@ sub get_regions {
 
 sub delete_add_chunks {
 	my ($self, %args) = @_;
-	my $chunknums     = $args{chunknums}                         || die "chunknums arg is required";
-	my $list          = $args{'list'}                            || die "list arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.del_chunks_a', [$self->a_chunks_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
+	my $chunknums     = $args{chunknums}                         or die "chunknums arg is required";
+	my $list          = $args{'list'}                            or die "list arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->master->lua( 'safebrowsing3.del_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
 		my ($result, $error) = @_;
 		log_error( "Tarantool error: ",$error ) if $error;
 		$cb->($error ? 1 : 0);
@@ -210,10 +218,10 @@ sub delete_add_chunks {
 
 sub delete_sub_chunks {
 	my ($self, %args) = @_;
-	my $chunknums     = $args{chunknums}                         || die "chunknums arg is required";
-	my $list          = $args{'list'}                            || die "list arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.del_chunks_s', [$self->s_chunks_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
+	my $chunknums     = $args{chunknums}                         or die "chunknums arg is required";
+	my $list          = $args{'list'}                            or die "list arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->master->lua( 'safebrowsing3.del_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
 		my ($result, $error) = @_;
 		log_error( "Tarantool error: ",$error ) if $error;
 		$cb->($error ? 1 : 0);
@@ -221,12 +229,19 @@ sub delete_sub_chunks {
 	return;
 }
 
+# select tuples from a_chunks using index2 (list + prefix)
+# in callback returns reference to array of fields:
+# (list, chunknum, prefix)
+# $ret = [ {list => res1_list, chunknum => res1_chunknum, prefix => res1_prefix},
+#          {list => res2_list, chunknum => res2_chunknum, prefix => res2_prefix},
+#          ..... ]
 sub get_add_chunks {
 	my ($self, %args) = @_;
-	my $hostkey       = $args{hostkey}                           || die "hostkey arg is required";
-	my $list          = $args{'lists'}                           || die "lists arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('a_chunks', [map [$_,$hostkey], @$list], {index => 2}, sub{
+	my $prefix        = $args{prefix}                            or die "prefix arg is required";
+	my $list          = $args{'lists'}                           or die "lists arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	
+	$self->dbh->slave->select('a_chunks', [map [$_, $prefix], @$list], {index => 2}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -244,12 +259,18 @@ sub get_add_chunks {
 	return;
 }
 
+# select tuples from s_chunks using index2 (list + prefix)
+# in callback returns reference to array of fields:
+# (list, chunknum, add_num, prefix)
+# $ret = [ {list => res1_list, chunknum => res1_chunknum, add_num => res1_add_num, prefix => res1_prefix},
+#          {list => res2_list, chunknum => res2_chunknum, add_num => res2_add_num, prefix => res2_prefix},
+#          ..... ]
 sub get_sub_chunks {
 	my ($self, %args) = @_;
-	my $hostkey       = $args{hostkey}                           || die "hostkey arg is required";
-	my $list          = $args{'lists'}                           || die "lists arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('s_chunks', [map [$_,$hostkey], @$list], {index => 2}, sub{
+	my $prefix        = $args{prefix}                            or die "prefix arg is required";
+	my $list          = $args{'lists'}                           or die "lists arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->slave->select('s_chunks', [map [$_,$prefix], @$list], {index => 2}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -272,7 +293,7 @@ sub delete_full_hashes {
 	my $chunknums     = $args{chunknums}                         || die "chunknums arg is required";
 	my $list          = $args{'list'}                            || die "list arg is required";
 	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.del_full_hash', [$self->full_hashes_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
+	$self->dbh->master->lua( 'safebrowsing3.del_full_hash3', [$self->full_hashes_space(),JSON::XS->new->encode([map +{list => $list, chunknum => $_}, @$chunknums])], {in => 'pp', out => 'p'}, sub {
 		my ($result, $error) = @_;
 		log_error( "Tarantool error: ",$error ) if $error;
 		$cb->($error ? 1 : 0);
@@ -280,13 +301,16 @@ sub delete_full_hashes {
 	return;
 }
 
+# searches full hashes by prefix (4 byte)
+# if found hash with expired date, remove it from database
 sub get_full_hashes {
 	my ($self, %args) = @_;
-	my $chunknum      = $args{chunknum}                          || die "chunknum arg is required";
-	my $list          = $args{'list'}                            || die "lists arg is required";
-	my $timestamp     = $args{'timestamp'}                       || die "timestamp arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('full_hashes', [[$list,$chunknum]], {index => 1}, sub{
+	my $prefix     = $args{'prefix'}                             or die "prefix arg is required";
+	my $list          = $args{'list'}                            or die "lists arg is required";
+	my $timestamp     = $args{'timestamp'}                       or die "timestamp arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
+	
+	$self->dbh->slave->select('full_hashes', [[$list,$prefix]], {index => 0}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -295,9 +319,10 @@ sub get_full_hashes {
 		else {
 			my $space = $self->dbh->master->{spaces}->{full_hashes};
 			my $ret = [];
+			
 			foreach my $tup ( @{$result->{tuples}} ){
 				if( $tup->[$space->{fast}->{timestamp}->{no}] < $timestamp ){
-					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1], $tup->[2]], sub {
+					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1]], sub {
 						my ($result, $error) = @_;
 						log_error( "Tarantool error: ".$error ) if $error;
 					});
@@ -315,33 +340,34 @@ sub get_full_hashes {
 sub add_chunks_s {
 	my ($self, $chunks, $cb) = @_;
 	ref $cb eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.add_chunks_s', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+	$self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
 		my ($result, $error) = @_;
 		log_error( "Tarantool error: ",$error ) if $error;
 		$cb->($error ? 1 : 0);
 	});
+        log_debug1("STORED s chunks");	
 }
 
 sub add_chunks_a {
 	my ($self, $chunks, $cb) = @_;
-	ref $cb eq 'CODE' || die "cb arg is required and must be CODEREF";
-	$self->dbh->master->lua( 'safebrowsing.add_chunks_a', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+	ref $cb eq 'CODE' or die "cb arg is required and must be CODEREF";
+	$self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
 		my ($result, $error) = @_;
 		log_error( "Tarantool error: ", $error ) if $error;
 		$cb->($error ? 1 : 0);
-	});
+        });
+        log_debug1("STORED a chunks");	
 }
 
 sub add_full_hashes {
 	my ($self, %args) 	= @_;
-	my $full_hashes   = $args{full_hashes}                       || die "full_hashes arg is required";
-	my $timestamp     = $args{timestamp}                         || die "timestamp arg is required";
-	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' || die "cb arg is required and must be CODEREF";
+	my $full_hashes   = $args{full_hashes}                       or die "full_hashes arg is required";
+	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
 
 	my $inserted = 0;
 	my $err = 0;
 	foreach my $fhash (@$full_hashes) {
-		$self->dbh->master->insert('full_hashes', [$fhash->{list}, $fhash->{chunknum}, $fhash->{hash}, $timestamp], sub {
+		$self->dbh->master->insert('full_hashes', [$fhash->{list}, $fhash->{hash}, $fhash->{timestamp}], sub {
 			my ($result, $error) = @_;
 			log_error( "Tarantool error: ".$error ) if $error;
 			$inserted++;
@@ -360,11 +386,11 @@ __PACKAGE__->meta->make_immutable();
 
 =head1 SEE ALSO
 
-See L<AnyEvent::Net::SafeBrowsing3> for handling Safe Browsing v2.
+See L<AnyEvent::Net::SafeBrowsing3> for handling Safe Browsing v3.
 
 See L<AnyEvent::Net::SafeBrowsing3::Storage> for the list of public functions.
 
-Google Safe Browsing v2 API: L<http://code.google.com/apis/safebrowsing/developers_guide_v2.html>
+Google Safe Browsing v3 API: L<https://developers.google.com/safe-browsing/developers_guide_v3>
 
 =head1 AUTHOR
 
@@ -372,7 +398,7 @@ Nikolay Shulyakovskiy, E<lt>shulyakovskiy@mail.ruE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2014 by Nikolay Shulyakovskiy
+Copyright (C) 2015 by Nikolay Shulyakovskiy
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,
