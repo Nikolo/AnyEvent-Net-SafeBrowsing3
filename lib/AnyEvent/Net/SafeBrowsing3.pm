@@ -37,17 +37,17 @@ AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v3 
   
   my $storage = AnyEvent::Net::SafeBrowsing3::Tarantool->new({
     host              => 'tarantool.host', 
-	port              => '33013', 
-	a_chunks_space    => 0, 
-	s_chunks_space    => 1, 
-	full_hashes_space => 2
+    port              => '33013', 
+    a_chunks_space    => 0, 
+    s_chunks_space    => 1, 
+    full_hashes_space => 2
   });
   $storage->dbh->connect();
 
   my $sb = AnyEvent::Net::SafeBrowsing3->new({
-	server => "http://safebrowsing.google.com/safebrowsing/", 
-	key => "key";
-	storage => $storage,
+    server => "http://safebrowsing.google.com/safebrowsing/", 
+    key => "key";
+    storage => $storage,
   });
 
   $sb->update(['goog-malware-shavar'], sub {warn "Next hope after ".$_[0], $cv->send()});
@@ -57,7 +57,7 @@ TODO
   my $match = $sb->lookup(url => 'http://www.gumblar.cn/');
   
   if ($match eq MALWARE) {
-	print "http://www.gumblar.cn/ is flagged as a dangerous site";
+    print "http://www.gumblar.cn/ is flagged as a dangerous site";
   }
 
   $storage->close();
@@ -89,9 +89,9 @@ IMPORTANT: If you start with an empty database, you will need to perform several
 Create a AnyEvent::Net::SafeBrowsing3 object
 
   my $sb = AnyEvent::Net::SafeBrowsing3->new(
-	key 	=> "key", 
-    storage	=> AnyEvent::Net::SafeBrowsing3::Tarantool->new(...),
-	log     => AnyEvent::Net::SafeBrowsing3::Log->new({debug_level => 'debug3'}),
+    key => "key", 
+    storage => AnyEvent::Net::SafeBrowsing3::Tarantool->new(...),
+    log     => AnyEvent::Net::SafeBrowsing3::Log->new({debug_level => 'debug3'}),
   );
 
 Arguments
@@ -161,7 +161,7 @@ has version      => (is => 'rw', isa => 'Str', default => '3.0' );
 has log_class    => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3::Log' );
 has storage      => (is => 'rw', isa => 'Object', default => sub {AnyEvent::Net::SafeBrowsing3::Storage->new()});
 has data         => (is => 'rw', isa => 'Object');
-has data_filepath=> (is => 'rw', isa => 'Str', default => '/tmp/safebrowsing_data' );
+has data_filepath=> (is => 'rw', isa => 'Str', default => '/tmp/safebrowsing_data3' );
 has in_update    => (is => 'rw', isa => 'Int');
 has force        => (is => 'rw', isa => 'Bool', default => '0');
 has http_timeout => (is => 'ro', isa => 'Int', default => '60');
@@ -204,83 +204,91 @@ Required. Callback function that will be called after db is updated.
 =cut
 
 sub update {
-	my ($self, $list, $cb_ret) = @_;
-	die "Required callback" unless $cb_ret;
-	return unless $list;
-	if( $self->in_update() ){
-		# Already in update status, next try after 30 sec 
-		$cb_ret->( $self->default_retry() );
-		return;
-	}
-	$self->in_update( scalar @$list );
-	my $mwait;
-	my $cb = sub {
-		my ($wait) = @_;
-		$mwait = $wait if !$mwait || $wait < $mwait;
-		$self->in_update( $self->in_update()-1 );
-		log_debug2( "In update: ".$self->in_update() );
-		$cb_ret->($mwait) unless $self->in_update();
-	};
-	foreach my $item ( @$list ){
-		my $info = $self->data->get('updated/'.$item);
-		log_info( "Update info: ", $info );
-		if(!$info || $info->{'time'} + $info->{'wait'} < AE::now() || $self->force ) {
+    my ($self, $list, $cb_ret) = @_;
+    die "Required callback" unless $cb_ret;
+    return unless $list;
+    if( $self->in_update() ){
+        # Already in update status, next try after 30 sec 
+        $cb_ret->( $self->default_retry() );
+        return;
+    }
+    $self->in_update( scalar @$list );
+    my $mwait;
+    my $cb = sub {
+        my ($wait) = @_;
+        $mwait = $wait if !$mwait || $wait < $mwait;
+        $self->in_update( $self->in_update()-1 );
+        log_debug2( "In update: ".$self->in_update() );
+        $cb_ret->($mwait) unless $self->in_update();
+    };
+    foreach my $item ( @$list ){
+        my $info = $self->data->get('updated/'.$item);
+        log_info( "Update info: ", $info );
+        if(!$info || $info->{'time'} + $info->{'wait'} < AE::now() || $self->force ) {
                         # OK to update list info
-			log_info("OK to update $item: " . AE::now() . "/" . 
+            log_info("OK to update $item: " . AE::now() . "/" . 
                                   ($info ? $info->{'time'} +  $info->{'wait'} : 'first update'));
-			my $do_request = sub {
-				$self->storage->get_regions(list => $item, cb => sub {
-					my($a_range, $s_range) = @_;
-					unless( defined $a_range ){
-						log_error( 'Get range error' );
-						$cb->($self->default_retry());
-						return;
-					}
-					my $chunks_list = '';
-					if ($a_range ne '') {
-						$chunks_list .= "a:$a_range";
-					}
-					if ($s_range ne '') {
-						$chunks_list .= ":" if ($a_range ne '');
-						$chunks_list .= "s:$s_range";
-					}
-					my $body .= "$item;$chunks_list";
-					$body .= "\n";
-					my $url = $self->server . "downloads?client=api&key=" . $self->key
-                                                                . "&appver=$VERSION&pver=" . $self->version;
-				 	log_debug1( "Url: ".$url );
-				 	log_debug1( "Body: ".$body );
-					http_post( $url, $body, %{$self->param_for_http_req}, sub {
-						my ($data, $headers) = @_; 
-						if( $headers->{Status} == 200 ){
-							if( $data ){
-								log_debug3("Response body: ".$data);
-								$self->process_update_data( $data, $cb );
-								}
-							else {
-								$cb->($self->default_retry());
-							}
-						}
-						else {
-							log_error("Bad response from server ".$headers->{Status} );
-							$self->update_error($item, $cb);
-						}
-						return;
-					});
-					return;
-				});
-				return;
-			};
+            my $do_request = sub {
+                $self->storage->get_regions(list => $item, cb => sub {
+                    my($a_range, $s_range) = @_;
+                    unless( defined $a_range ){
+                        log_error( 'Get range error' );
+                        $cb->($self->default_retry());
+                        return;
+                    }
 
-			$do_request->();
-			
-		}
-		else {
-			log_info("Too early to update $item");
-			$cb->(int($info->{'time'} + $info->{'wait'}-AE::now()));
-		}
-	}
-	return;
+                                        # request body
+                                        # examples:
+                                        #     googpub-phish-shavar;a:1-3,5,8:s:4-5
+                                        #     googpub-phish-shavar;a:1-5
+                                        #     googpub-phish-shavar;
+                    my $chunks_list = '';
+                    if ($a_range ne '') {
+                        $chunks_list .= "a:$a_range";
+                    }
+                    if ($s_range ne '') {
+                        $chunks_list .= ":" if ($a_range ne '');
+                        $chunks_list .= "s:$s_range";
+                    }
+                    my $body .= "$item;$chunks_list";
+                    $body .= "\n";
+
+                                        # request URL
+                    my $url = $self->server . "downloads?client=api&key=" . $self->key
+                                                                . "&appver=$VERSION&pver=" . $self->version;
+                    log_debug1( "Url: ".$url );
+                    log_debug1( "Body: ".$body );
+                    http_post( $url, $body, %{$self->param_for_http_req}, sub {
+                        my ($data, $headers) = @_; 
+                        if( $headers->{Status} == 200 ){
+                            if( $data ){
+                                log_debug3("Response body: ".$data);
+                                $self->process_update_data( $data, $cb );
+                                }
+                            else {
+                                $cb->($self->default_retry());
+                            }
+                        }
+                        else {
+                            log_error("Bad response from server ".$headers->{Status} );
+                            $self->update_error($item, $cb);
+                        }
+                        return;
+                    });
+                    return;
+                });
+                return;
+            };
+
+            $do_request->();
+            
+        }
+        else {
+            log_info("Too early to update $item");
+            $cb->(int($info->{'time'} + $info->{'wait'}-AE::now()));
+        }
+    }
+    return;
 }
 
 =head2 force_update()
@@ -310,11 +318,11 @@ Required. Callback function that will be called after db is updated.
 =cut
 
 sub force_update {
-	my $self = shift;
-	$self->force(1);
-	$self->update(@_);
-	$self->force(0);
-	return;
+    my $self = shift;
+    $self->force(1);
+    $self->update(@_);
+    $self->force(0);
+    return;
 }
 
 =head2 lookup()
@@ -346,123 +354,124 @@ Required. Callback function that will be called after db is updated.
 =cut
 
 sub lookup {
-	my ($self, %args) 	= @_;
-	my $list 			= $args{list}		or die "List is required";
-	my $url 			= $args{url}		or die "URL is required";
-	my $cb              = $args{cb}         or die "Callback is required";
+    my ($self, %args)   = @_;
+    my $list        = $args{list}       or die "List is required";
+    my $url     = $args{url}        or die "URL is required";
+    my $cb              = $args{cb}         or die "Callback is required";
 
-	# TODO: create our own URI management for canonicalization
-	# fix for http:///foo.com (3 ///)
-	$url =~ s/^(https?:\/\/)\/+/$1/;
+    # TODO: create our own URI management for canonicalization
+    # fix for http:///foo.com (3 ///)
+    $url =~ s/^(https?:\/\/)\/+/$1/;
 
-	my $uri = URI->new($url)->canonical;
-	die "Bad url ".$url if $uri->scheme !~ /^https?$/;
-	
-	# compute full hashes (32b) and prefixes (4b) for all canonical combinations of URLs (domain + path). result data in binary
-	my @full_hashes = $self->full_hashes($uri);
-	my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
-	
+    my $uri = URI->new($url)->canonical;
+    die "Bad url ".$url if $uri->scheme !~ /^https?$/;
+    
+    # compute full hashes (32b) and prefixes (4b) for all canonical combinations of URLs (domain + path). result data in binary
+    my @full_hashes = $self->full_hashes($uri);
+    my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
+    
     # check if any prefix (4 bytes long) match with local database.
     # prefix in match is a hex string (because prefixes are stored in databse like hex strings)
     # returns a reference to list of add chunks to callback
     # TODO rename suffix to prefix
     
     foreach my $prefix (@full_hashes_prefix) {
-        $self->local_lookup_prefix(lists => $lists, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
-			my $add_chunks = shift;
-			unless( scalar @$add_chunks ){
-				$cb->();
-				return;
-			}
-			
-			# if any prefix matches with local database, check for full hashes stored locally
-			# preliminary declarations
-			my $found = '';
-			my $processed = 0;
-			my $watcher = sub {
-				my $list = shift;
-				$found ||= $list if $list;  
-				$processed++;
-				if($processed == @$add_chunks){
-					if( $found ){
-						$cb->($found);
-					}
-					else {
-						log_debug2("No match");
-						$cb->();
-					}
-				}
-			};
-	
-			# get stored full hashes
-			# returns a reference to list of full hashes found to callback
-			foreach my $add_chunk (@$add_chunks) {
-				$self->storage->get_full_hashes( prefix => $add_chunk->{prefix}, timestamp => time(), list => $add_chunk->{list}, cb => sub {
-					my $hashes = shift;
-					if( @$hashes ){
-						log_debug2("Full hashes already stored for prefix " . $add_chunk->{prefix} . ": " . scalar @$hashes);
-						my $fnd = '';
-						log_debug1( "Searched hashes: ", \@full_hashes );
-						
-						# find match between our computed full hashes and full hashes retrieved from local database
-						foreach my $full_hash (@full_hashes) {
-							foreach my $hash (@$hashes) {
-								if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
-									log_debug2("Full hash was found in storage: ", $hash);
-									$fnd = $hash->{list};
-								}
-							}
-						}
-						$watcher->($fnd);
-					}
-					else {
-						# ask Google for new hashes
-						# TODO: make sure we don't keep asking for the same over and over
-						
-						$self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
-							my $hashes = shift;
-							log_debug1( "Full hashes: ", $hashes);
-							$self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
-							
-							# check for new full hashes
-							# preliminary declaration
-							$processed = 0;
-							$found = '';
-							my $watcher = sub {
-								my $list = shift;
-								$found ||= $list if $list;  
-								$processed++;
-								if($processed == @full_hashes){
-									if( $found ){
-										$cb->($found);
-									}
-									else {
-										$cb->();
-									}
-								}
-							};
-							
-							foreach my $full_hash (@full_hashes) {
-								my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
-								if (! defined $hash){
-									$watcher->();
-									next;
-								}
-	
-								my $list = first { $hash->{list} eq $_ } @$lists;
-	
-								if (defined $hash && defined $list) {
-									log_debug2("Match: $full_hash");
-									$watcher->($hash->{list});
-								}
-							}
-						});
-					}
-				});
-			}
-		});
+        $self->local_lookup_prefix(lists => $list, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
+            my $add_chunks = shift;
+        unless( scalar @$add_chunks ){
+        $cb->([]);
+        return;
+        }
+            
+        # if any prefix matches with local database, check for full hashes stored locally
+        # preliminary declarations
+        my $found = '';
+        my $processed = 0;
+        my $watcher = sub {
+        my $list = shift;
+        $found ||= $list if $list;  
+                $processed++;
+                if($processed == @$add_chunks){
+                    if( $found ){
+                        $cb->($found);
+                    }
+                    else {
+                        log_debug2("No match");
+                        $cb->([]);
+                    }
+                }
+            };
+    
+            # get stored full hashes
+            # returns a reference to list of full hashes found to callback
+            foreach my $add_chunk (@$add_chunks) {
+                $self->storage->get_full_hashes( prefix => $add_chunk->{prefix}, timestamp => time(), list => $add_chunk->{list}, cb => sub {
+                    my $hashes = shift;
+                    if( @$hashes ){
+                        log_debug2("Full hashes already stored for prefix " . $add_chunk->{prefix} . ": " . scalar @$hashes);
+                        my $fnd = '';
+                        log_debug1( "Searched hashes: ", \@full_hashes );
+                        
+                        # find match between our computed full hashes and full hashes retrieved from local database
+                        foreach my $full_hash (@full_hashes) {
+                            foreach my $hash (@$hashes) {
+                                                                if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$list) {
+                                    log_debug2("Full hash was found in storage: ", $hash);
+                                    $fnd = $hash->{list};
+                                }
+                            }
+                        }
+                        $watcher->($fnd);
+                    }
+                    else {
+                        # ask Google for new hashes
+                        # TODO: make sure we don't keep asking for the same over and over
+                        
+                        $self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
+                            my $hashes = shift;
+                            log_debug1( "Full hashes: ", $hashes);
+                            $self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
+                            
+                            # check for new full hashes
+                            # preliminary declaration
+                            $processed = 0;
+                            $found = '';
+                            my $watcher = sub {
+                                my $list = shift;
+                                $found ||= $list if $list;  
+                                $processed++;
+                                if($processed == @full_hashes){
+                                    if( $found ){
+                                        $cb->($found);
+                                    }
+                                    else {
+                                        $cb->([]);
+                                    }
+                                }
+                            };
+                            
+                            foreach my $full_hash (@full_hashes) {
+                                my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
+                                if (! defined $hash){
+                                    $watcher->();
+                                    next;
+                                }
+    
+                                                                 my $list = first { $hash->{list} eq $_ } @$list;
+
+                                                               if (defined $hash && defined $list) {
+    
+                                    log_debug2("Match: $full_hash");
+                                    $watcher->($hash->{list});
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        });
     }    
-	return;
+    return;
 }
 
 =head1 PRIVATE FUNCTIONS
@@ -480,14 +489,14 @@ Constructor
 =cut
 
 sub BUILD {
-	my $self = shift;
-	eval "use ".$self->log_class.";";
-	die $@ if $@;
-	if( $self->data && $self->data_filepath ){
-		die "Available only one parameter data or data_filepath";
-	}
-	$self->data( AnyEvent::Net::SafeBrowsing3::Data->new( path => $self->data_filepath ));
-	return $self;
+    my $self = shift;
+    eval "use ".$self->log_class.";";
+    die $@ if $@;
+    if( $self->data && $self->data_filepath ){
+        die "Available only one parameter data or data_filepath";
+    }
+    $self->data( AnyEvent::Net::SafeBrowsing3::Data->new( path => $self->data_filepath ));
+    return $self;
 }
 
 =head2 param_for_http_req()
@@ -497,14 +506,15 @@ Generate params for http request
 =cut
 
 sub param_for_http_req {
-	my $self = shift;
-	return {timeout => $self->http_timeout, tls_ctx => {verify => 1}, headers => { "user-agent" => $self->user_agent }}
+    my $self = shift;
+    return {timeout => $self->http_timeout, tls_ctx => {verify => 1}, headers => { "user-agent" => $self->user_agent }}
 }
 
 =head2 process_update_data()
 
 Process the data received from server.
 
+data is response body.
 data format:
 
 n:1200
@@ -522,225 +532,120 @@ Then calls parse_data() function foreach item in redirection list.
 =cut
 
 sub process_update_data {
-	my ($self, $data, $cb) = @_;
-	my @lines = split /\s/, $data;
+    my ($self, $data, $cb) = @_;
+    my @lines = split /\s/, $data;
 
-        say "========= DUMPER ============";
-        say Dumper(\@lines);
-        say "=============================";
+    my $wait = $self->default_retry();
 
-	my $wait = $self->default_retry();
+    my @redirections = ();
+    my $del_add_duration = 0;
+    my $del_sub_duration = 0;
+    my $add_range_info = '';
+    my $list = '';
 
-	my @redirections = ();
-	my $del_add_duration = 0;
-	my $del_sub_duration = 0;
-	my $add_range_info = '';
-	my $list = '';
+    foreach my $line (@lines) {
+        if ($line =~ /n:\s*(\d+)\s*$/) {
+            log_info("Next poll: $1 seconds");
+            $wait = $1;
+            $self->data->set( 'updated/'.$list, {'time' => AE::now(), 'wait' => $wait} ) if $list;
+        }
+        elsif ($line =~ /i:\s*(\S+)\s*$/) {
+            log_debug1("List: $1");
+            $list = $1;
+            $self->data->set( 'updated/'.$list, {'time' => AE::now(), 'wait' => $wait} ) if $wait;
+        }
+        elsif ($line =~ /u:\s*(\S+)\s*$/) {
+            unless( $list ){
+                log_error("Unknown list. Skip.");
+                next;
+            }
+            log_debug1("Redirection: $1");
+            push(@redirections, [$1, $list]);
+        }
+        elsif ($line =~ /ad:(\S+)$/) {
+            unless( $list ){
+                log_error("Unknown list. Skip.");
+                next;
+            }
+            log_debug1("Delete Add Chunks: $1");
 
-	foreach my $line (@lines) {
-		if ($line =~ /n:\s*(\d+)\s*$/) {
-			log_info("Next poll: $1 seconds");
-			$wait = $1;
-			$self->data->set( 'updated/'.$list, {'time' => AE::now(), 'wait' => $wait} ) if $list;
-		}
-		elsif ($line =~ /i:\s*(\S+)\s*$/) {
-			log_debug1("List: $1");
-			$list = $1;
-			$self->data->set( 'updated/'.$list, {'time' => AE::now(), 'wait' => $wait} ) if $wait;
-		}
-		elsif ($line =~ /u:\s*(\S+)\s*$/) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_debug1("Redirection: $1");
-			push(@redirections, [$1, $list]);
-		}
-		elsif ($line =~ /ad:(\S+)$/) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_debug1("Delete Add Chunks: $1");
+            $add_range_info = $1 . " $list";
+            my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
+            if( @$nums ){
+                $self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)});
+                                # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
+                                # chunknums are not storing in FULL_HASHES space any more
+                # Delete full hash as well
+                #$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
+            }
+        }
+        elsif ($line =~ /sd:(\S+)$/) {
+            unless( $list ){
+                log_error("Unknown list. Skip.");
+                next;
+            }
+            log_debug1("Delete Sub Chunks: $1");
 
-			$add_range_info = $1 . " $list";
-			my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
-			if( @$nums ){
-				$self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)});
-				# Delete full hash as well
-				$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
-			}
-		}
-		elsif ($line =~ /sd:(\S+)$/) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_debug1("Delete Sub Chunks: $1");
+            my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
+            $self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {}) if @$nums;
+        }
+        elsif ($line =~ /r:pleasereset/) {
+            unless( $list ){
+                log_error("Unknown list. Skip.");
+                next;
+            }
+            log_info("Database must be reset");
 
-			my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
-			$self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {}) if @$nums;
-		}
-		elsif ($line =~ /r:pleasereset/) {
-			unless( $list ){
-				log_error("Unknown list. Skip.");
-				next;
-			}
-			log_info("Database must be reset");
-
-			$self->storage->reset($list);
-			@redirections = ();
-			$wait = 10;
-			last;
-		}
-	}
-	my $have_error = 0;
-	my $get_redir;
-	$get_redir = sub {
-		my $redirections = shift;
-		my $data = shift( @$redirections );
-		my $redirection = $data->[0];
-		$list = $data->[1];
-		log_debug1("Url: https://$redirection");
-		http_get( "https://$redirection", %{$self->param_for_http_req}, sub {
-			my ($data, $headers) = @_; 
-			log_debug1("Checking redirection https://$redirection ($list)");
-			if( $headers->{Status} == 200 ){
-				$self->parse_data(data => $data, list => $list, cb => sub {
-					my $error = shift;
-					if( $error ){
-						log_error("Have error while update data");
-						$self->update_error($list, $cb);
-					}
-					else {
-						if( @$redirections ){
-							$get_redir->($redirections);
-						}
-						else {
-							$cb->($wait);
-						}
-					}
-				});
-			}
-			else {
-				log_error("Request to $redirection failed ".$headers->{Status});
-				$self->update_error($list, $cb);
-			}
-			return;
-		});
-	};
-	if( @redirections ){
-		$get_redir->(\@redirections);
-	}
-	else {
-		$cb->($wait);
-	}
-	return;
+            $self->storage->reset($list);
+            @redirections = ();
+            $wait = 10;
+            last;
+        }
+    }
+    my $have_error = 0;
+    my $get_redir;
+    $get_redir = sub {
+        my $redirections = shift;
+        my $data = shift( @$redirections );
+        my $redirection = $data->[0];
+        $list = $data->[1];
+        log_debug1("Url: https://$redirection");
+        http_get( "https://$redirection", %{$self->param_for_http_req}, sub {
+            my ($data, $headers) = @_; 
+            log_debug1("Checking redirection https://$redirection ($list)");
+            if( $headers->{Status} == 200 ){
+                $self->parse_data(data => $data, list => $list, cb => sub {
+                    my $error = shift;
+                    if( $error ){
+                        log_error("Have error while update data");
+                        $self->update_error($list, $cb);
+                    }
+                    else {
+                        if( @$redirections ){
+                            $get_redir->($redirections);
+                        }
+                        else {
+                            $cb->($wait);
+                        }
+                    }
+                });
+            }
+            else {
+                log_error("Request to $redirection failed ".$headers->{Status});
+                $self->update_error($list, $cb);
+            }
+            return;
+        });
+    };
+    if( @redirections ){
+        $get_redir->(\@redirections);
+    }
+    else {
+        $cb->($wait);
+    }
+    return;
 }
 
-
-=head2 lookup_suffix()
-
-Lookup a host prefix.
-
-=cut
-
-sub lookup_suffix {
-	my ($self, %args) 	= @_;
-	my $lists 			= $args{lists} 		|| croak "Missing lists";
-	my $url 			= $args{url}		|| return '';
-	my $suffix			= $args{suffix}		|| return '';
-	my $cb              = $args{cb}         || die "Callback is required";
-
-	# Calculcate prefixes
-	my @full_hashes = $self->full_hashes($url); # Get the prefixes from the first 4 bytes
-	my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
- 	# Local lookup
-	$self->local_lookup_prefix(lists => $lists, url => $url, suffix => $suffix, full_hashes_prefix => [@full_hashes_prefix], cb => sub {
-		my $add_chunks = shift;
-		unless( scalar @$add_chunks ){
-			$cb->();
-			return;
-		}
-		# Check against full hashes
-		my $found = '';
-		my $processed = 0;
-		my $watcher = sub {
-			my $list = shift;
-			$found ||= $list if $list;  
-			$processed++;
-			if($processed == @$add_chunks){
-				if( $found ){
-					$cb->($found);
-				}
-				else {
-					log_debug2("No match");
-					$cb->();
-				}
-			}
-		};
-
-		# get stored full hashes
-		foreach my $add_chunk (@$add_chunks) {
-			$self->storage->get_full_hashes( chunknum => $add_chunk->{chunknum}, timestamp => time() - $self->cache_time, list => $add_chunk->{list}, cb => sub {
-				my $hashes = shift;
-				if( @$hashes ){
-					log_debug2("Full hashes already stored for chunk " . $add_chunk->{chunknum} . ": " . scalar @$hashes);
-					my $fnd = '';
-					log_debug1( "Searched hashes: ", \@full_hashes );
-					foreach my $full_hash (@full_hashes) {
-						foreach my $hash (@$hashes) {
-							if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
-								log_debug2("Full hash was found in storage: ", $hash);
-								$fnd = $hash->{list};
-							}
-						}
-					}
-					$watcher->($fnd);
-				}
-				else {
-					# ask for new hashes
-					# TODO: make sure we don't keep asking for the same over and over
-					$self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}) || pack( 'L', $_->{hostkey}), @$add_chunks) ], cb => sub {
-						my $hashes = shift;
-						log_debug1( "Full hashes: ", $hashes);
-						$self->storage->add_full_hashes(full_hashes => $hashes, timestamp => time(), cb => sub {});
-						$processed = 0;
-						$found = '';
-						my $watcher = sub {
-							my $list = shift;
-							$found ||= $list if $list;  
-							$processed++;
-							if($processed == @full_hashes){
-								if( $found ){
-									$cb->($found);
-								}
-								else {
-									$cb->();
-								}
-							}
-						};
-						foreach my $full_hash (@full_hashes) {
-							my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
-							if (! defined $hash){
-								$watcher->();
-								next;
-							}
-
-							my $list = first { $hash->{list} eq $_ } @$lists;
-
-							if (defined $hash && defined $list) {
-								log_debug2("Match: $full_hash");
-								$watcher->($hash->{list});
-							}
-						}
-					});
-				}
-			});
-		}
-	});
-	return;
-}
 
 =head2 local_lookup_prefix()
 
@@ -749,46 +654,46 @@ Lookup a prefix in the local database only.
 =cut
 
 sub local_lookup_prefix {
-	my ($self, %args) 	= @_;
-	my $lists 		= $args{lists} 		or croak "Missing lists";
-	my $prefix		= $args{prefix}		or return ();
-	my $cb                  = $args{cb}             or die "Callback is required";
+    my ($self, %args)   = @_;
+    my $lists       = $args{lists}      or croak "Missing lists";
+    my $prefix      = $args{prefix}     or return ();
+    my $cb                  = $args{cb}             or die "Callback is required";
 
-	# Step 1: get all add chunks for this prefix 
-	# Do it for all lists
-	$self->storage->get_add_chunks(prefix => $prefix, lists => $lists, cb => sub {
-		my $add_chunks = shift;
-		unless( scalar @$add_chunks ){
-			$cb->([]); 
-			return;
-		}
-		
-		# Step 2: get all sub chunks for this prefix
-		$self->storage->get_sub_chunks(prefix => $prefix, lists => $lists, cb => sub {
-			my $sub_chunks = shift;
+    # Step 1: get all add chunks for this prefix 
+    # Do it for all lists
+    $self->storage->get_add_chunks(prefix => $prefix, lists => $lists, cb => sub {
+        my $add_chunks = shift;
+        unless( scalar @$add_chunks ){
+            $cb->([]); 
+            return;
+        }
+        
+        # Step 2: get all sub chunks for this prefix
+        $self->storage->get_sub_chunks(prefix => $prefix, lists => $lists, cb => sub {
+            my $sub_chunks = shift;
                         # Step 3: filter out add_chunks with sub_chunks 
-			foreach my $sub_chunk (@$sub_chunks) {
-				my $i = 0;
-				while ($i < scalar @$add_chunks) {
-					my $add_chunk = $add_chunks->[$i];
+            foreach my $sub_chunk (@$sub_chunks) {
+                my $i = 0;
+                while ($i < scalar @$add_chunks) {
+                    my $add_chunk = $add_chunks->[$i];
 
-					if ($add_chunk->{chunknum} != $sub_chunk->{add_num} || $add_chunk->{list} ne $sub_chunk->{list}) {
-						$i++;
-						next;
-					}
+                    if ($add_chunk->{chunknum} != $sub_chunk->{add_num} || $add_chunk->{list} ne $sub_chunk->{list}) {
+                        $i++;
+                        next;
+                    }
 
-					if ($sub_chunk->{prefix} eq $add_chunk->{prefix}) {
-						splice(@$add_chunks, $i, 1);
-					}
-					else {
-						$i++;
-					}
-				}
-			}
-			$cb->( $add_chunks ); 
-		});
-	});
-	return ;
+                    if ($sub_chunk->{prefix} eq $add_chunk->{prefix}) {
+                        splice(@$add_chunks, $i, 1);
+                    }
+                    else {
+                        $i++;
+                    }
+                }
+            }
+            $cb->( $add_chunks ); 
+        });
+    });
+    return ;
 }
 
 =head2 local_lookup()
@@ -820,9 +725,9 @@ Required. Callback function that will be called after db is updated.
 =cut
 
 sub local_lookup {
-    my ($self, %args) 	= @_;
-    my $list 			= $args{list}		||  '';
-    my $url 			= $args{url}		or return '';
+    my ($self, %args)   = @_;
+    my $list            = $args{list}       ||  '';
+    my $url         = $args{url}        or return '';
 
     my @lists = @{$self->{list}};
     @lists = @{[$args{list}]} if ($list ne '');
@@ -835,11 +740,11 @@ sub local_lookup {
 
     my $uri = URI->new($url)->canonical;
     die "Bad url ".$url if $uri->scheme !~ /^https?$/;
-	
+    
     # compute full hashes (32b) and prefixes (4b) for all canonical combinations of URLs (domain + path). result data in binary
     my @full_hashes = $self->full_hashes($uri);
     my @full_hashes_prefix = map (substr($_, 0, 4), @full_hashes);
-	
+    
     # check if any prefix (4 bytes long) match with local database.
     # prefix in match is a hex string (because prefixes are stored in databse like hex strings)
     # returns a reference to list of add chunks to callback
@@ -860,214 +765,194 @@ Handle server errors during a database update.
 =cut
 
 sub update_error {
-	my ($self, $list, $cb) = @_;
+    my ($self, $list, $cb) = @_;
 
-		my $info = $self->data->get('updated/'.$list);
-		$info->{errors} = 0 if (! exists $info->{errors});
-		my $errors = $info->{errors} + 1;
-		my $wait = 0;
+        my $info = $self->data->get('updated/'.$list);
+        $info->{errors} = 0 if (! exists $info->{errors});
+        my $errors = $info->{errors} + 1;
+        my $wait = 0;
 
-		$wait = $errors == 1 ? 60
-			: $errors == 2 ? int(30 * 60 * (rand(1) + 1)) # 30-60 mins
-		    : $errors == 3 ? int(60 * 60 * (rand(1) + 1)) # 60-120 mins
-		    : $errors == 4 ? int(2 * 60 * 60 * (rand(1) + 1)) # 120-240 mins
-		    : $errors == 5 ? int(4 * 60 * 60 * (rand(1) + 1)) # 240-480 mins
-	    : $errors  > 5 ? 480 * 60
-		: 0;
+        $wait = $errors == 1 ? 60
+            : $errors == 2 ? int(30 * 60 * (rand(1) + 1)) # 30-60 mins
+            : $errors == 3 ? int(60 * 60 * (rand(1) + 1)) # 60-120 mins
+            : $errors == 4 ? int(2 * 60 * 60 * (rand(1) + 1)) # 120-240 mins
+            : $errors == 5 ? int(4 * 60 * 60 * (rand(1) + 1)) # 240-480 mins
+        : $errors  > 5 ? 480 * 60
+        : 0;
 
-		$self->data->set('updated/'.$list, {'time' => $info->{time}||AE::now(), 'wait' => $wait, errors => $errors});
-		$cb->($wait);
-		return;
-	}
+        $self->data->set('updated/'.$list, {'time' => $info->{time}||AE::now(), 'wait' => $wait, errors => $errors});
+        $cb->($wait);
+        return;
+    }
 
-=head2 parse_s()
 
-Parse data from a rediration (add asnd sub chunk information).
-
-=cut
-
-#======================================
-=head2 parse_data_v3
+=head2 parse_data
 
 Parse data from a rediraction.
 Data comes in ProtoBuf format
 
+parse_data(
+      data => $data, 
+      list => $list, 
+      cb => sub {...})
+
+ARGUMENTS:
+   $data - response body from redirect link. contains binary data - some protobuf structs. each struct has format:
+     -----------------------------------------------------------
+     BODY      = (UINT32 CHUNKDATA)+
+     UINT32    = Unsigned 32-bit integer in network byte order.    => length of following data fragment which must be unpacked as Protobuf
+     CHUNKDATA = Encoded ChunkData protocol message, see below.    => this must be unpacked as Protobuf
+     -----------------------------------------------------------
+ 
+   $lis - list name (available list types: goog-malware-shavar, goog-regtest-shavar, goog-whitedomain-shavar, googpub-phish-shavar)
+   $cb - callback function
+
 =cut
 
-# parse_data_v3(
-# #      data => $data, 
-# #      list => $list, 
-# #      cb => sub {...})
-# # процедура (ничего не возвращает)
-# # ARGUMENTS:
-# # $data - тело ответа на https-запрос по redirection ссылке. двоичные данные, содержат несколько структур ProtoBuf
-# #     -----------------------------------------------------------
-# #     BODY      = (UINT32 CHUNKDATA)+
-# #     UINT32    = Unsigned 32-bit integer in network byte order.    => число=длина след.фрагмента данных, который нужно распоковать как Protobuf
-# #     CHUNKDATA = Encoded ChunkData protocol message, see below.    => данные длиной UINT32 байт, которые можно распоковать с помощью ProtoBuf
-# #     -----------------------------------------------------------
-# # 
-# # $list - название списка (available list types: goog-malware-shavar, goog-regtest-shavar, goog-whitedomain-shavar, googpub-phish-shavar)
-# # $cb - callback function
-
-#======================================
-
 sub parse_data {
-    my ($self, %args) 	= @_;
-    my $data 		= $args{data} 		|| '';
-    my $list 		= $args{list} 		|| '';
-    my $cb		= $args{cb} 		or die "Callback is required";
-	
+    my ($self, %args)   = @_;
+    my $data        = $args{data}       || '';
+    my $list        = $args{list}       || '';
+    my $cb      = $args{cb}     or die "Callback is required";
+    
     my $protobuf_len = 0;
     my $protobuf_data = '';
-	
+    
     my $bulk_insert_a = [];
     my $bulk_insert_s = [];
 
-	
-    # читаем побайтно данные из $data (выдергивая их)
+    
     while (length $data > 0) {
         $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
         $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
 
-	# perl hash format of decoded protobuf data is 
-	# (~ - for optional fields. they're available throught accessor):
-	# {
-	#    chunk_number => int32,
-	#  ~ chunk_type   => 0 or 1 (for ADD / SUB. ADD default),
-	#  ~ prefix_type  => 0 or 1 (for 4B / 32B. 4B default),
-	#  ~ hashes       => packed bites as string,
-	#    add_numbers  => [456789, 456123, ....] список из int32, только в sub чанке используется
-	# }
+    # perl hash format of decoded protobuf data is 
+    # (~ - for optional fields. they're available throught accessor):
+    # {
+    #    chunk_number => int32,
+    #  ~ chunk_type   => 0 or 1 (for ADD / SUB. ADD default),
+    #  ~ prefix_type  => 0 or 1 (for 4B / 32B. 4B default),
+    #  ~ hashes       => packed bites as string,
+    #    add_numbers  => [456789, 456123, ....] list of int32 values, used in sub_chunks only
+    # }
 
-	my $chunk_num = $protobuf_data->chunk_number();
-	my $chunk_type = $protobuf_data->chunk_type();
-	my $hash_length = $protobuf_data->prefix_type() ? 32 : 4;
-	
-	if ($chunk_type == 0) {
+    my $chunk_num = $protobuf_data->chunk_number();
+    my $chunk_type = $protobuf_data->chunk_type();
+    my $hash_length = $protobuf_data->prefix_type() ? 32 : 4;
+    
+    if ($chunk_type == 0) {
             # it is add chunk
-	    my @data = $self->parse_a(value => $protobuf_data->hashes(), 
-			    hash_length => $hash_length);
-	    foreach my $item (@data) {
-	        push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };	
-	    }	    	
-	}
-	elsif ($chunk_type == 1) {
-	    # it is sub chunk
-	    my @data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
-            say Dumper("data of s type", \@data);
+        my @data = $self->parse_a(value => $protobuf_data->hashes(), 
+                hash_length => $hash_length);
+        foreach my $item (@data) {
+        push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };    
+        }       
+    }
+    elsif ($chunk_type == 1) {
+        # it is sub chunk
+        my @data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
+            #say Dumper("data of s type", \@data);
             foreach my $item (@data) {
                 #say Dumper("bulk data", { chunknum => $chunk_num, chunk => $item, list => $list });
-        	push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };	
+        push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };    
             }
-	}
-	else {
-	    # it is unknown chunk
-	    log_error("Incorrect chunk type: $chunk_type, should be 0 or 1 (for a: or s:)");
-	    $cb->(1);
-	    return;
-	} 
-        # OLD: log_debug1("$type$chunk_num:$hash_length:$chunk_length OK");
-        #TODO remove "in ...." from log_debug
-	log_debug1(join "", "(in parse_data()) ", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len OK");
+    }
+    else {
+        # it is unknown chunk
+        log_error("Incorrect chunk type: $chunk_type, should be 0 or 1 (for a: or s:)");
+        $cb->(1);
+        return;
+    } 
+
+    log_debug1(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), "OK");
     }
 
-    my $in_process = 0; # сколько хранилищ (add, sub) обновляется
+    my $in_process = 0; # how many tables are in update (add, sub)
     my $have_error = 0;
 
     my $watcher = sub {
-	my $err = shift;
-	$in_process--;
-	$have_error ||= $err;
-	log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
-	if(!$in_process){
+    my $err = shift;
+    $in_process--;
+    $have_error ||= $err;
+    log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
+    if(!$in_process){
             $cb->($have_error);
-	}
+    }
     };
-	
+    
     ++$in_process if @$bulk_insert_a;
     ++$in_process if @$bulk_insert_s;
-	
-    #TODO add_chunks_a, add_chunks_s
+    
     $self->storage->add_chunks_a($bulk_insert_a, $watcher) if @$bulk_insert_a;
     $self->storage->add_chunks_s($bulk_insert_s, $watcher) if @$bulk_insert_s; 
-	
+    
     return;
 }
 
 =head2 parse_s
 
-# -------------------------------------------------------------------------------
-# разбирает значения префиксов из protobuf структуры для добавления в базу sub
-# parse_s_v3(
-#    value => encoded_hashes,
-#    add_chunknums => $@add_numbers,
-#    hash_length => 4) # 4 or 32
-#
-# TODO what's better to pass: reference or hash
-#
-# OUTPUT: @data =( {add_chunknum => 123456, prefix => hash1}, {add_chunknum => 456123, prefix => hash2}, ...)
-# -------------------------------------------------------------------------------
+Unpack sub prefixes from protobuf structure and returns a list of these prefix as hex strings
+
+parse_s(
+   value => encoded_hashes,
+   add_chunknums => $add_numbers,  # ARRAYREF
+   hash_length => 4)               # 4 or 32
+
+TODO what's better to pass: reference or hash
+
+OUTPUT: @data = ( {add_chunknum => 123456, prefix => prefix1}, {add_chunknum => 456123, prefix => prefix2}, ...)
 
 =cut
 
 sub parse_s {
-	my ($self, %args)  = @_;
-	my $value          = $args{value}          or return ();      
-	my $add_chunknums  = $args{add_chunknums}  or return (); 
-	my $hash_length    = $args{hash_length};
-	
-	# нужно установить соответствие между декодируемыми хэшами и номерами add-чанков из массива $add_chunknums
-       	
-        # ======== DEBUG ==============================
-        log_debug1("in parse_s()");
-        say "ref is: ", ref $add_chunknums;
-	
-        if (scalar(@$add_chunknums) != length($value)/$hash_length) {
-                log_error("Incorrect number of add-chunks");
-		return ();
-	}
-        # ======== DEBUG ==============================
-	
-	my @data = ();
-	
-	foreach my $add_chunknum (@$add_chunknums) {
-		my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
-		push(@data, { add_chunknum => $add_chunknum, prefix => $prefix });
-                log_debug1("(in parse_s()) s : $add_chunknum : $prefix ADDED");
-                # TODO логгирование: log_debug1("$add_chunknum $prefix");
-	}
-        say Dumper("in parse_s Dumper", \@data);
+    my ($self, %args)  = @_;
+    my $value          = $args{value}          or return ();      
+    my $add_chunknums  = $args{add_chunknums}  or return (); 
+    my $hash_length    = $args{hash_length};
+    
+    # check that the number of add_chunknums is equal to the number of hashes
+    if (scalar(@$add_chunknums) != length($value)/$hash_length) {
+        log_error("Incorrect number of add-chunks");
+        return ();
+    }
 
-	return @data;
+    my @data = ();
+    
+    foreach my $add_chunknum (@$add_chunknums) {
+    my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
+    push(@data, { add_chunknum => $add_chunknum, prefix => $prefix });
+        log_debug1("parsed s-prefix : $add_chunknum : $prefix");
+    }
+
+    return @data;
 }
 
 
 =head parse_a
-# -------------------------------------------------------------------------------
-# разбирает значения префиксов из protobuf структуры для добавления в базу add
-# parse_a_v3(
-#    value => encoded_hashes,  # = hashes
-#    hash_length => 4)         # = prefix_type, 4 or 32
-# OUTPUT: @data = (hash1, hash2, hash3, ...)
-# -------------------------------------------------------------------------------
+
+Unpack add prefixes from protobuf structure and returns a list of these prefix as hex strings
+
+parse_a(
+   value => encoded_hashes,  # = hashes
+   hash_length => 4)         # = prefix_type, 4 or 32
+
+OUTPUT: @data = (prefix1, prefix2, ...)
+
 =cut
 
-sub parse_a (%) {
-	my ($self, %args)  = @_;
-	my $value          = $args{value}         or return ();
-	my $hash_length    = $args{hash_length}; 
-	
-	my @data = (); # данные для загрузки в базу. одноуровневый массив вида @data = (hash1, hash2, hash3, ...)
-	
-	while (length $value > 0) {
-		my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
-		push @data, { prefix => $prefix };
-                log_debug1("(in parse_a()) a : $prefix ADDED");
-		# TODO логгирование: log_debug1($host." ".$prefix); # old version. now no $host
+sub parse_a {
+    my ($self, %args)  = @_;
+    my $value          = $args{value}         or return ();
+    my $hash_length    = $args{hash_length}; 
+    
+    my @data = (); 
+    
+    while (length $value > 0) {
+        my $prefix = unpack 'H*', substr($value, 0, $hash_length, '');
+    push @data, { prefix => $prefix };
+        log_debug1("parsed a-prefix : $prefix");
     }
-
-	return @data;
+    return @data;
 }
 
 =head2 canonical_domain()
@@ -1077,8 +962,8 @@ Find all canonical domains a domain.
 =cut
 
 sub canonical_domain {
-    my ($self, $domain) 	= @_;
-	
+    my ($self, $domain)     = @_;
+    
     # requirements
     #
     #   PREPARE DOMAIN:
@@ -1088,7 +973,7 @@ sub canonical_domain {
     # The client should handle any legal IP- address encoding, including octal, hex, and fewer than 4 components.
     # see: http://habrahabr.ru/post/69587/
     # example: Canonicalize("http://3279880203/blah") => "http://195.127.0.11/blah";
-    # TODO according to policy	???
+    # TODO according to policy  ???
     # 4. Lowercase the whole string.
     # (it's just lowercased by URI->host)
     # 
@@ -1096,10 +981,10 @@ sub canonical_domain {
     # @domains contains:
     # 1. the exact hostname in the URL
     # 2. up to 4 hostnames formed by starting with the last 5 components and successively removing the leading component.
-	
+    
     $domain =~ s<^\.*([^.].*[^.])\.*$><$1>; # prepare 1
     $domain =~ s<\.{2,}><\.>g;              # prepare 2
-	
+    
     my @domains = ($domain);
     if ($domain =~ /^\d+\.\d+\.\d+\.\d+$/) { # loose check for IP address, should be enough
         return @domains;
@@ -1108,7 +993,7 @@ sub canonical_domain {
     push(@domains, $domain) if ($domain =~ s/^(.*)\.  (([^.]+\.){4}  [^.]+) $/$2/x);
     
     while ($domain =~ s/^[^.]+\.(.*)$/$1/ and $domain =~ /\./) {
-    	push @domains, $domain;
+    push @domains, $domain;
     };
     
     return @domains;
@@ -1126,33 +1011,33 @@ example: /1/2.html?param=1
 =cut
 
 sub canonical_path {
-    my ($self, $path_query) 	= @_;
-	
+    my ($self, $path_query) = @_;
+    
     # requirement
     #
     #   PREPARE PATH
     # 1. replace "/./" with "/", 
     # 2. Replace runs of consecutive slashes with a single slash character.
-    # 3. remove "/../" along with the preceding path component.	
+    # 3. remove "/../" along with the preceding path component. 
     # Do not apply path canonicalizations to the query parameters.
     #
     #   CREATE A LIST OF PATH VARIANTS
     # 1. the exact path of the URL, including query parameters
     # 2. the exact path of the URL, without query parameters
     # 3. the 4 paths formed by starting at the root (/) and successively appending path components, including a trailing slash.
-	
+    
     my ($path, $query) = split('\?', $path_query); 
-	
+    
     my $path_orig = $path;
     $path =~ s</\./></>g;     # prepare 1
     $path =~ s<\/{2,}><\/>g;  # prepare 2
     $path =~ s<^.*/\.\./><>g; # prepare 3
 
     $path =~ s<^\/><>;
-	
+    
     my @paths = ($path, '');
     push @paths, "$path?$query" if $query;
-	
+    
     my $prev = '';
 
     for (my $i = 0; $i < 4; ++$i) {
@@ -1160,7 +1045,7 @@ sub canonical_path {
         if ($path =~ s<^ ([^/]+)  (\/)? ><>x) {
             my $curr = defined($2) ? "$1$2" : $1; 
             last if !defined($curr);
-    	    $prev .= "$curr";
+        $prev .= "$curr";
             push @paths, $prev if ($prev ne $path_orig);
         } 
     }
@@ -1175,17 +1060,17 @@ Find all possible combinations of domain + path  for a given URL.
 =cut
 
 sub canonical {
-	my ($self, $url) = @_;
-	my @urls = ();
-	my $uri = $self->canonical_uri($url);
-	my @domains = $self->canonical_domain($uri->host);
-	my @paths = $self->canonical_path($uri->path_query);
-	foreach my $domain (@domains) {
-		foreach my $path (@paths) {
-			push(@urls, "$domain\/$path");
-		}
-	}
-	return @urls;
+    my ($self, $url) = @_;
+    my @urls = ();
+    my $uri = $self->canonical_uri($url);
+    my @domains = $self->canonical_domain($uri->host);
+    my @paths = $self->canonical_path($uri->path_query);
+    foreach my $domain (@domains) {
+        foreach my $path (@paths) {
+            push(@urls, "$domain\/$path");
+        }
+    }
+    return @urls;
 }
 
 
@@ -1198,79 +1083,79 @@ NOTE: URI cannot handle all the test cases provided by Google. This method is a 
 =cut
 
 sub canonical_uri {
-	my ($self, $url) = @_;
-	$url = AnyEvent::Net::SafeBrowsing3::Utils->trim( $url );
-	while ($url =~ s/^([^?]+)[\r\t\n]/$1/sgi) { } 
-	my $uri = URI->new($url)->canonical; # does not deal with directory traversing
-	if (! $uri->scheme() || $uri->scheme() eq '') {
-		$uri = URI->new("http://$url")->canonical;
-	}
-	$uri->fragment('');
-	my $escape = $uri->as_string;
-	while ($escape =~ s/^([a-z]+:\/\/[^?]+)\/\//$1\//sgi) { }
+    my ($self, $url) = @_;
+    $url = AnyEvent::Net::SafeBrowsing3::Utils->trim( $url );
+    while ($url =~ s/^([^?]+)[\r\t\n]/$1/sgi) { } 
+    my $uri = URI->new($url)->canonical; # does not deal with directory traversing
+    if (! $uri->scheme() || $uri->scheme() eq '') {
+        $uri = URI->new("http://$url")->canonical;
+    }
+    $uri->fragment('');
+    my $escape = $uri->as_string;
+    while ($escape =~ s/^([a-z]+:\/\/[^?]+)\/\//$1\//sgi) { }
 
-	# Remove empty fragment
-	$escape =~ s/#$//;
+    # Remove empty fragment
+    $escape =~ s/#$//;
 
-	# canonial does not handle ../ 
-	while($escape =~ s/([^\/])\/([^\/]+)\/\.\.([\/?].*)$/$1$3/gi) {  }
-	while($escape =~ s/([^\/])\/([^\/]+)\/\.\.$/$1/gi) {  }
+    # canonial does not handle ../ 
+    while($escape =~ s/([^\/])\/([^\/]+)\/\.\.([\/?].*)$/$1$3/gi) {  }
+    while($escape =~ s/([^\/])\/([^\/]+)\/\.\.$/$1/gi) {  }
 
-	# May have removed ending /
-	$escape .= "/" if ($escape =~ /^[a-z]+:\/\/[^\/\?]+$/);
-	$escape =~ s/^([a-z]+:\/\/[^\/]+)(\?.*)$/$1\/$2/gi;
+    # May have removed ending /
+    $escape .= "/" if ($escape =~ /^[a-z]+:\/\/[^\/\?]+$/);
+    $escape =~ s/^([a-z]+:\/\/[^\/]+)(\?.*)$/$1\/$2/gi;
 
-	# other weird case if domain = digits only, try to translte it to IP address
-	if ((my $domain = URI->new($escape)->host) =~/^\d+$/) {
-		my @ip = unpack("C4",pack("N",$domain));
-		if( scalar( grep {$_ ne "" && $_ >= 0 && $_ <= 255} @ip) == 4 ){
-			$uri = URI->new($escape);
-			$uri->host(join ".", @ip);
-			$escape = $uri->as_string;
-		}
-	}
+    # other weird case if domain = digits only, try to translte it to IP address
+    if ((my $domain = URI->new($escape)->host) =~/^\d+$/) {
+        my @ip = unpack("C4",pack("N",$domain));
+        if( scalar( grep {$_ ne "" && $_ >= 0 && $_ <= 255} @ip) == 4 ){
+            $uri = URI->new($escape);
+            $uri->host(join ".", @ip);
+            $escape = $uri->as_string;
+        }
+    }
 
-	# Try to escape the path again
-	$url = $escape;
-	while (($escape = URI::Escape::uri_unescape($url)) ne $escape) { # wrong for %23 -> #
-		$url = $escape;
-	}
+    # Try to escape the path again
+    $url = $escape;
+    while (($escape = URI::Escape::uri_unescape($url)) ne $escape) { # wrong for %23 -> #
+        $url = $escape;
+    }
 
-	# Fix for %23 -> #
-	while($escape =~ s/#/%23/sgi) { }
+    # Fix for %23 -> #
+    while($escape =~ s/#/%23/sgi) { }
 
-	# Fix over escaping
-	while($escape =~ s/^([^?]+)%%(%.*)$/$1%25%25$2/sgi) { }
-	while($escape =~ s/^([^?]+)%%/$1%25%25/sgi) { }
+    # Fix over escaping
+    while($escape =~ s/^([^?]+)%%(%.*)$/$1%25%25$2/sgi) { }
+    while($escape =~ s/^([^?]+)%%/$1%25%25/sgi) { }
 
-	# URI has issues with % in domains, it gets the host wrong
+    # URI has issues with % in domains, it gets the host wrong
 
-		# 1. fix the host
-	my $exception = 0;
-	while ($escape =~ /^[a-z]+:\/\/[^\/]*([^a-z0-9%_.-\/:])[^\/]*(\/.*)$/) {
-		my $source = $1;
-		my $target = sprintf("%02x", ord($source));
-		$escape =~ s/^([a-z]+:\/\/[^\/]*)\Q$source\E/$1%\Q$target\E/;
-		$exception = 1;
-	}
+        # 1. fix the host
+    my $exception = 0;
+    while ($escape =~ /^[a-z]+:\/\/[^\/]*([^a-z0-9%_.-\/:])[^\/]*(\/.*)$/) {
+        my $source = $1;
+        my $target = sprintf("%02x", ord($source));
+        $escape =~ s/^([a-z]+:\/\/[^\/]*)\Q$source\E/$1%\Q$target\E/;
+        $exception = 1;
+    }
 
-		# 2. need to parse the path again
-	if ($exception && $escape =~ /^[a-z]+:\/\/[^\/]+\/(.+)/) {
-		my $source = $1;
-		my $target = URI::Escape::uri_unescape($source);
+        # 2. need to parse the path again
+    if ($exception && $escape =~ /^[a-z]+:\/\/[^\/]+\/(.+)/) {
+        my $source = $1;
+        my $target = URI::Escape::uri_unescape($source);
 
-		while ($target ne URI::Escape::uri_unescape($target)) {
-			$target = URI::Escape::uri_unescape($target);
-		}
-		$escape =~ s/\/\Q$source\E/\/$target/;
+        while ($target ne URI::Escape::uri_unescape($target)) {
+            $target = URI::Escape::uri_unescape($target);
+        }
+        $escape =~ s/\/\Q$source\E/\/$target/;
 
-		while ($escape =~ s/#/%23/sgi) { } # fragement has been removed earlier
-		while ($escape =~ s/^([a-z]+:\/\/[^\/]+\/.*)%5e/$1\&/sgi) { } # not in the host name
+        while ($escape =~ s/#/%23/sgi) { } # fragement has been removed earlier
+        while ($escape =~ s/^([a-z]+:\/\/[^\/]+\/.*)%5e/$1\&/sgi) { } # not in the host name
 
-		while ($escape =~ s/%([^0-9a-f]|.[^0-9a-f])/%25$1/sgi) { }
-	}
+        while ($escape =~ s/%([^0-9a-f]|.[^0-9a-f])/%25$1/sgi) { }
+    }
 
-	return URI->new($escape);
+    return URI->new($escape);
 }
 
 =head2 full_hashes()
@@ -1280,16 +1165,16 @@ Return all possible full hashes for a URL.
 =cut
 
 sub full_hashes {
-	my ($self, $url) = @_;
+    my ($self, $url) = @_;
 
-	my @urls = $self->canonical($url);
-	my @hashes = ();
+    my @urls = $self->canonical($url);
+    my @hashes = ();
 
-	foreach my $url (@urls) {
-		push(@hashes, sha256($url));
-	}
+    foreach my $url (@urls) {
+        push(@hashes, sha256($url));
+    }
 
-	return @hashes;
+    return @hashes;
 }
 
 =head2 request_full_hash()
@@ -1305,61 +1190,61 @@ OUT to cb:
 =cut
 
 sub request_full_hash {
-	my ($self, %args) 	= @_;
-	my $prefixes		= $args{prefixes}; ref $prefixes eq 'ARRAY'	or die "Arg prefixes is required and must be arrayref";
-	my $cb                  = $args{cb}                                     or die "Args cb is required";
-	my $size		= length $prefixes->[0];
-# 	# Handle errors
-	my $i = 0;
-	my $errors;
-	my $delay = sub {
-    	my $time = shift;
-		if ((time() - $errors->{timestamp}) < $time) {
-			splice(@$prefixes, $i, 1);
-		}
-		else {
-			$i++;
-		}
-	};
-	
-	while ($i < scalar @$prefixes) {
-		my $prefix = $prefixes->[$i];
+    my ($self, %args)   = @_;
+    my $prefixes        = $args{prefixes}; ref $prefixes eq 'ARRAY' or die "Arg prefixes is required and must be arrayref";
+    my $cb                  = $args{cb}                                     or die "Args cb is required";
+    my $size        = length $prefixes->[0];
+#   # Handle errors
+    my $i = 0;
+    my $errors;
+    my $delay = sub {
+    my $time = shift;
+        if ((time() - $errors->{timestamp}) < $time) {
+            splice(@$prefixes, $i, 1);
+        }
+        else {
+            $i++;
+        }
+    };
+    
+    while ($i < scalar @$prefixes) {
+        my $prefix = $prefixes->[$i];
         
-		$errors = $self->data->get('full_hash_errors/'.unpack( 'H*', $prefix));
-		if (defined $errors && $errors->{errors} > 2) { # 2 errors is OK
-			$errors->{errors} == 3 ? $delay->(30 * 60) # 30 minutes
-		    	: $errors->{errors} == 4 ? $delay->(60 * 60) # 1 hour
-		      	: $delay->(2 * 60 * 60); # 2 hours
-		}
-		else {
-			$i++;
-		}
-	}
-	
-	# request URL
-	my $url = $self->server . "gethash?client=api&key=" . $self->key . "&appver=$VERSION&pver=" . $self->version;
-	log_debug1( "Full hash url: ". $url);
-	
-	# request body
-	# example:
-	#     4:12          => size_of_each_prefix_in_bytes ":" total_length_of_prefixes_in_bytes
-	#     123456781234  => chain of prefixes in binary
-	
-	my $prefix_list = join('', @$prefixes);
-	my $header = "$size:" . scalar @$prefixes * $size;
-	my $body = $header."\n".$prefix_list;
-	log_debug1( "Full hash data: ". $body);
-	
-	http_post( $url, $body, %{$self->param_for_http_req}, sub {
-		my ($data, $headers) = @_; 
-		if( $headers->{Status} == 200 && length $data){
-			log_debug1("Full hash request OK");
-			log_debug3("Response body: ".$data);
-			$self->data->delete('full_hash_errors/'.unpack( 'H*', $_ )) for @$prefixes;
-			
-			# parse response 
-			# example 1:
-			#    900                                                                  => CACHELIFETIME (in seconds)
+        $errors = $self->data->get('full_hash_errors/'.unpack( 'H*', $prefix));
+        if (defined $errors && $errors->{errors} > 2) { # 2 errors is OK
+            $errors->{errors} == 3 ? $delay->(30 * 60) # 30 minutes
+            : $errors->{errors} == 4 ? $delay->(60 * 60) # 1 hour
+            : $delay->(2 * 60 * 60); # 2 hours
+        }
+        else {
+            $i++;
+        }
+    }
+    
+    # request URL
+    my $url = $self->server . "gethash?client=api&key=" . $self->key . "&appver=$VERSION&pver=" . $self->version;
+    log_debug1( "Full hash url: ". $url);
+    
+    # request body
+    # example:
+    #     4:12          => size_of_each_prefix_in_bytes ":" total_length_of_prefixes_in_bytes
+    #     123456781234  => chain of prefixes in binary
+    
+    my $prefix_list = join('', @$prefixes);
+    my $header = "$size:" . scalar @$prefixes * $size;
+    my $body = $header."\n".$prefix_list;
+    log_debug1( "Full hash data: ". $body);
+    
+    http_post( $url, $body, %{$self->param_for_http_req}, sub {
+        my ($data, $headers) = @_; 
+        if( $headers->{Status} == 200 && length $data){
+            log_debug1("Full hash request OK");
+            log_debug3("Response body: ".$data);
+            $self->data->delete('full_hash_errors/'.unpack( 'H*', $_ )) for @$prefixes;
+            
+            # parse response 
+            # example 1:
+            #    900                                                                  => CACHELIFETIME (in seconds)
                         #    goog-malware-shavar:32:2:m                                           => LISTNAME ":" HASHSIZE ":" NUMRESPONSES [":m"] 
                         #    01234567890123456789012345678901987654321098765432109876543210982    => HASHDATA_BINARY [METADATALEN 
                         #    AA3                                                                  => METADATA_BINARY]*
@@ -1372,83 +1257,83 @@ sub request_full_hash {
                         #    01234567890123456789012345678901
                         #
                         # example 3:
-                        #    900	
-			# ------------------
-			my @hashes = ();
-			# my @metadata = ();
-			
-			# 1) unpack CACHELIFETIME  (900)
-			if ($data !~ /^(\d+)/) {
-				log_error("error in parsing full hash response");
-				$cb->([]);
-				return;
-			}
-			my $cache_lifetime = $1;
-			substr($data, 0, length($cache_lifetime."\n"), '');
+                        #    900    
+            # ------------------
+            my @hashes = ();
+            # my @metadata = ();
+            
+            # 1) unpack CACHELIFETIME  (900)
+            if ($data !~ /^(\d+)/) {
+                log_error("error in parsing full hash response");
+                $cb->([]);
+                return;
+            }
+            my $cache_lifetime = $1;
+            substr($data, 0, length($cache_lifetime."\n"), '');
                         my $valid_to = $self->cache_time ? time() + $self->cache_time : time() + $cache_lifetime;
-			
-			# 2) handle empty answer
-			if ($data eq '') {
+            
+            # 2) handle empty answer
+            if ($data eq '') {
                                 my $list = join (" | ", @$prefixes);
-				log_debug1("Empty answer for prefixlist ($list) for $cache_lifetime seconds");
-				# TODO store empty answers anywhere
-				$cb->([]);
-				return;
-			}
-			
-			while (length $data > 0) {
-	                   # 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
-			    if ($str !~ /^([a-z\-]+):(\d+):(\d+)/) {
-				    log_error("error in parsing full hash response");
-				    $cb->([]);
-				    return;
-			    }
-			    my ($list, $hash_size, $num_responses) = ($1, $2, $3);
-			    substr($data, 0, length($list.":".$hash_size.":".$num_responses),'');
-			    
-			    # 4) check if there is metadata  
-			    my $has_meta = 0;
-			    if ($str =~ /^:m/) {
-			        $has_meta = 1;
-			        substr($data, 0, length(":m\n"),'');        
-			    }
-			    else {
-			    	substr($data, 0, length("\n"),''); 
-			    }
-			    
-			    # 5) unpack hashes (binary). length of each hash = $hash_size
-			    for (my $i = 0; $i < $num_responses; ++$i) {
-			        my $hash = substr($data, 0, $hash_size, ''); # кусаем байты!
-			        push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
-			    }
-			    
-			    # 6) unpack metadata (2\nAA3\nBBBnext_text)
-			    # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, so this metadata isn't stored anywhere.
-			    if ($has_meta) {
-			    	while ($str =~ /^(\d+)/) {
-			    		my $meta_len = $1; 		
-			    		my $meta = substr($data, length($meta_len."\n"), $meta_len);
-			    		substr($data, 0,length($meta_len."\n".$meta), '');
-			    	    # push(@metadata, $meta);
-			    	}
-			    }
-			}
-			
-			$cb->(\@hashes);			
-			# ------------------
-		}
-		else {
-			log_error("Full hash request failed ".$headers->{Status} );
-			foreach my $prefix (@$prefixes) {
-				my $errors = $self->data->get('full_hash_errors/'.unpack( 'H*', $prefix));
-				if (defined $errors && ( $errors->{errors} >=2 || $errors->{errors} == 1 && (time() - $errors->{timestamp}) > 5 * 60)) { # 5 minutes
-					$self->data->set('full_hash_errors/'.unpack( 'H*', $prefix ).'/timestamp', time()); # more complicate than this, need to check time between 2 errors
-				}
-			}
-		}
-		return;
-	});
-	return;
+                log_debug1("Empty answer for prefixlist ($list) for $cache_lifetime seconds");
+                # TODO store empty answers anywhere
+                $cb->([]);
+                return;
+            }
+            
+            while (length $data > 0) {
+               # 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
+                if ($data !~ /^([a-z\-]+):(\d+):(\d+)/) {
+                    log_error("error in parsing full hash response");
+                    $cb->([]);
+                    return;
+                }
+                my ($list, $hash_size, $num_responses) = ($1, $2, $3);
+                substr($data, 0, length($list.":".$hash_size.":".$num_responses),'');
+                
+                # 4) check if there is metadata  
+                my $has_meta = 0;
+                if ($data =~ /^:m/) {
+                $has_meta = 1;
+                substr($data, 0, length(":m\n"),'');        
+                }
+                else {
+                substr($data, 0, length("\n"),''); 
+                }
+                
+                # 5) unpack hashes (binary). length of each hash = $hash_size
+                for (my $i = 0; $i < $num_responses; ++$i) {
+                my $hash = substr($data, 0, $hash_size, ''); # кусаем байты!
+                push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
+                }
+                
+                # 6) unpack metadata (2\nAA3\nBBBnext_text)
+                # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, so this metadata isn't stored anywhere.
+                if ($has_meta) {
+                while ($data =~ /^(\d+)/) {
+                    my $meta_len = $1;      
+                    my $meta = substr($data, length($meta_len."\n"), $meta_len);
+                    substr($data, 0,length($meta_len."\n".$meta), '');
+                    # push(@metadata, $meta);
+                }
+                }
+            }
+            
+            $cb->(\@hashes);            
+            # ------------------
+        }
+        else {
+            log_error("Full hash request failed ".$headers->{Status} );
+            foreach my $prefix (@$prefixes) {
+                my $errors = $self->data->get('full_hash_errors/'.unpack( 'H*', $prefix));
+                if (defined $errors && ( $errors->{errors} >=2 || $errors->{errors} == 1 && (time() - $errors->{timestamp}) > 5 * 60)) { # 5 minutes
+                    $self->data->set('full_hash_errors/'.unpack( 'H*', $prefix ).'/timestamp', time()); # more complicate than this, need to check time between 2 errors
+                }
+            }
+        }
+        return;
+    });
+    return;
 }
 
 Google::ProtocolBuffers->parse("
