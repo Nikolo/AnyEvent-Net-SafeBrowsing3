@@ -6,7 +6,7 @@ use Mouse;
 
 =head1 NAME
 
-AnyEvent::Net::SafeBrowsing3::Storage - Base class for storing the Safe Browsing v2 database
+AnyEvent::Net::SafeBrowsing3::Storage - Base class for storing the Safe Browsing v3 databases
 
 =head1 SYNOPSIS
 
@@ -16,9 +16,9 @@ AnyEvent::Net::SafeBrowsing3::Storage - Base class for storing the Safe Browsing
 
 =head1 DESCRIPTION
 
-This is the base class for implementing a storage mechanism for the Safe Browsing v2 database. See L<AnyEvent::Net::SafeBrowsing3::Tarantool> for an example of implementation.
+This is the base class for implementing a storage mechanism for the Safe Browsing v3 database. See L<AnyEvent::Net::SafeBrowsing3::Tarantool> for an example of implementation.
 
-This module cannot be used on its own as it does not actually store anything. All methods should redefined. Check the code to see which arguments are used, and what should be returned.
+This module cannot be used on its own as it does not actually store anything. All methods should be redefined. Check the code to see which arguments are used, and what should be returned.
 
 =cut
 
@@ -30,9 +30,9 @@ This module cannot be used on its own as it does not actually store anything. Al
 
 =head2 new()
 
-  Create a AnyEvent::Net::SafeBrowsing3::Storage object
+  Create an AnyEvent::Net::SafeBrowsing3::Storage object
 
-  my $storage	=> AnyEvent::Net::SafeBrowsing3::Storage->new();
+  my $storage = AnyEvent::Net::SafeBrowsing3::Storage->new();
 
 Arguments
 
@@ -50,9 +50,9 @@ Optional. Slave address database server host:port
 
 =back
 
-=item log
+=item log_class
 
-Required. Class for log writing. Default AnyEvent::Net::SafeBrowsing3::Log
+Required. Name of class for log writing. Default 'AnyEvent::Net::SafeBrowsing3::Log'
 
 =cut
 
