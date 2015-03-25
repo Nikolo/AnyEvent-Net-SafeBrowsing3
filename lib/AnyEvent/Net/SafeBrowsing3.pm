@@ -16,8 +16,6 @@ use AnyEvent::Net::SafeBrowsing3::Utils;
 use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
-# FOR DEBUG ONLY
-use utf8;
 
 our $VERSION = '1.01';
 
@@ -51,13 +49,6 @@ AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v3 
   $sb->update(['goog-malware-shavar'], sub {warn "Next hope after ".$_[0], $cv->send()});
   $cv->recv;
 
-TODO
-  my $match = $sb->lookup(url => 'http://www.gumblar.cn/');
-  
-  if ($match eq MALWARE) {
-    print "http://www.gumblar.cn/ is flagged as a dangerous site";
-  }
-
   $storage->close();
 
 =head1 DESCRIPTION
@@ -84,13 +75,16 @@ IMPORTANT: If you start with an empty database, you will need to perform several
 
 =head2 new()
 
-Create a AnyEvent::Net::SafeBrowsing3 object
+Create an AnyEvent::Net::SafeBrowsing3 object
 
-  my $sb = AnyEvent::Net::SafeBrowsing3->new(
-    key => "key", 
-    storage => AnyEvent::Net::SafeBrowsing3::Tarantool->new(...),
-    log     => AnyEvent::Net::SafeBrowsing3::Log->new({debug_level => 'debug3'}),
-  );
+  my $sb = AnyEvent::Net::SafeBrowsing3->new({
+      server => "https://safebrowsing.google.com/safebrowsing/",
+      key => "afaf1234......",
+      storage => AnyEvent::Net::SafeBrowsing3::Tarantool->new(...),
+      log_class => 'MyProject::MyLog',
+      data_filepath => '/tmp/safebrowsing_data',
+      cache_time => 45*60,
+})
 
 Arguments
 
@@ -106,39 +100,35 @@ Required. Your Safe browsing API key
 
 =item storage
 
-Required. Object which handle the storage for the Safe Browsing database (AnyEvent::Net::SafeBrowsing3::Empty by default). See L<AnyEvent::Net::SafeBrowsing3::Storage> for more details.
+Required. Object which handles the storage for the Safe Browsing database (instance of AnyEvent::Net::SafeBrowsing3::Empty by default). See L<AnyEvent::Net::SafeBrowsing3::Storage> for more details.
 
 =item version
 
 Optional. Safe Browsing version. 3.0 by default
 
-=item log
+=item log_class
 
-Optional. Object for log writing. Default AnyEvent::Net::SafeBrowsing3::Log
-
-=item data
-
-Optional. Object which handle the storage for the additioanl params. Default AnyEvent::Net::SafeBrowsing3::Data
+Optional. Name of class for writing a log. Default is 'AnyEvent::Net::SafeBrowsing3::Log'
 
 =item data_filepath
 
-Optional. Path to data file 
+Optional. Path to a scratch file where safebrowsing will store its ancillary data. Default is '/tmp/safebrowsing_data3' 
 
 =item http_timeout 
 
-Optional. Timeout for request to Safe Browsing service. Default 60 sec
+Optional. Timeout for request to Safe Browsing service. Measured in seconds. Default 60 sec
 
 =item user_agent
 
-Optional. User agent which be received to SafeBrowsing service. Default AnyEvent::Net::SafeBrowsing3 client $VERSION
+Optional. User agent which will be received  SafeBrowsing service. Default "AnyEvent::Net::SafeBrowsing3 client $VERSION"
 
 =item cache_time
 
-Optional. Time for chace result of full hashes. Default 45 min
+Optional. For how many seconds full hashes data is cached. If cache_time isn't set then values recieved from SafeBrowsing service will be used  
 
 =item default_retry
 
-Optional. Retry timeout after unknown fail. Default 30 sec
+Optional. Retry timeout after unknown fail. Measured in seconds. Default 30 sec
 
 =back
 
@@ -146,16 +136,16 @@ Optional. Retry timeout after unknown fail. Default 30 sec
 
 has server       => (is => 'rw', isa => 'Str', required => 1 );
 has key          => (is => 'rw', isa => 'Str', required => 1 );
+has storage      => (is => 'rw', isa => 'Object', default => sub {AnyEvent::Net::SafeBrowsing3::Empty->new()});
 has version      => (is => 'rw', isa => 'Str', default => '3.0' );
 has log_class    => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3::Log' );
-has storage      => (is => 'rw', isa => 'Object', default => sub {AnyEvent::Net::SafeBrowsing3::Storage->new()});
 has data         => (is => 'rw', isa => 'Object');
 has data_filepath=> (is => 'rw', isa => 'Str', default => '/tmp/safebrowsing_data3' );
 has in_update    => (is => 'rw', isa => 'Int');
 has force        => (is => 'rw', isa => 'Bool', default => '0');
-has http_timeout => (is => 'ro', isa => 'Int', default => '60');
+has http_timeout => (is => 'ro', isa => 'Int', default => 60);
 has user_agent   => (is => 'rw', isa => 'Str', default => 'AnyEvent::Net::SafeBrowsing3 client '.$VERSION );
-has cache_time   => (is => 'ro', isa => 'Int', default => 45*60);
+has cache_time   => (is => 'ro', isa => 'Int');
 has default_retry=> (is => 'ro', isa => 'Int', default => 30);
 
 =head1 PUBLIC FUNCTIONS
@@ -168,9 +158,9 @@ has default_retry=> (is => 'ro', isa => 'Int', default => 30);
 
 Perform a database update.
 
-  $sb->update('list', sub {});
+  $sb->update(['goog-malware-shavar', 'googpub-phish-shavar'], sub {});
 
-Return the time of next hope to update db
+Return the time of next hope to update database.
 
 This function can handle two lists at the same time. If one of the list should not be updated, it will automatically skip it and update the other one. It is faster to update two lists at once rather than doing them one by one.
 
@@ -182,11 +172,11 @@ Arguments
 
 =item list
 
-Required. Update a specific list.
+Required. Reference to array that contains list names.
 
 =item callback
 
-Required. Callback function that will be called after db is updated.
+Required. Callback function that will be called after database is updated.
 
 =back
 
@@ -368,89 +358,89 @@ sub lookup {
         $self->local_lookup_prefix(lists => $lists, prefix => sprintf("%x", unpack('N', $prefix)), cb => sub {
             my $add_chunks = shift;
             unless( scalar @$add_chunks ){
-            $cb->([]);
-            return;
-        }
-            
-        # if any prefix matches with local database, check for full hashes stored locally
-        # preliminary declarations
-        my $found = '';
-        my $processed = 0;
-        my $watcher = sub {
-            my $list = shift;
-            $found ||= $list if $list;  
-            $processed++;
-            if($processed == @$add_chunks){
-                if( $found ){
-                    $cb->($found);
-                }
-                else {
-                    log_debug2("No match");
-                    $cb->([]);
-                }
+                $cb->([]);
+                return;
             }
-        };
+            
+            # if any prefix matches with local database, check for full hashes stored locally
+            # preliminary declarations
+            my $found = '';
+            my $processed = 0;
+            my $watcher = sub {
+                my $list = shift;
+                $found ||= $list if $list;  
+                $processed++;
+                if($processed == @$add_chunks){
+                    if( $found ){
+                        $cb->($found);
+                    }
+                    else {
+                        log_debug2("No match");
+                        $cb->([]);
+                    }
+                }
+            };
     
-        # get stored full hashes
-        # returns a reference to array of full hashes found to callback
-        foreach my $add_chunk (@$add_chunks) {
-           $self->storage->get_full_hashes( prefix => $add_chunk->{prefix}, timestamp => time(), list => $add_chunk->{list}, cb => sub {
-               my $hashes = shift;
-               if( @$hashes ){
-                   log_debug2("Full hashes already stored for prefix " . $add_chunk->{prefix} . ": " . scalar @$hashes);
-                   my $fnd = '';
-                   log_debug1( "Searched hashes: ", \@full_hashes );
+            # get stored full hashes
+            # returns a reference to array of full hashes found to callback
+            foreach my $add_chunk (@$add_chunks) {
+               $self->storage->get_full_hashes( prefix => $add_chunk->{prefix}, timestamp => time(), list => $add_chunk->{list}, cb => sub {
+                   my $hashes = shift;
+                   if( @$hashes ){
+                       log_debug2("Full hashes already stored for prefix " . $add_chunk->{prefix} . ": " . scalar @$hashes);
+                       my $fnd = '';
+                       log_debug1( "Searched hashes: ", \@full_hashes );
                    
-                   # find match between our computed full hashes and full hashes retrieved from local database
-                   foreach my $full_hash (@full_hashes) {
-                       foreach my $hash (@$hashes) {
-                           if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
-                               log_debug2("Full hash was found in storage: ", $hash);
-                               $fnd = $hash->{list};
+                       # find match between our computed full hashes and full hashes retrieved from local database
+                       foreach my $full_hash (@full_hashes) {
+                           foreach my $hash (@$hashes) {
+                               if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
+                                   log_debug2("Full hash was found in storage: ", $hash);
+                                   $fnd = $hash->{list};
+                               }
                            }
                        }
+                       $watcher->($fnd);
                    }
-                   $watcher->($fnd);
-               }
-               else {
-                   # ask Google for new hashes
-                   # TODO: make sure we don't keep asking for the same over and over
+                   else {
+                       # ask Google for new hashes
+                       # TODO: make sure we don't keep asking for the same over and over
                         
-                   $self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
-                       my $hashes = shift;
-                       log_debug1( "Full hashes: ", $hashes);
-                       $self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
+                       $self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
+                           my $hashes = shift;
+                           log_debug1( "Full hashes: ", $hashes);
+                           $self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
                        
-                       # check for new full hashes
-                       # preliminary declaration
-                       $processed = 0;
-                       $found = '';
-                       my $watcher = sub {
-                           my $list = shift;
-                           $found ||= $list if $list;  
-                           $processed++;
-                           if($processed == @full_hashes){
-                               if( $found ){
-                                   $cb->($found);
+                           # check for new full hashes
+                           # preliminary declaration
+                           $processed = 0;
+                           $found = '';
+                           my $watcher = sub {
+                               my $list = shift;
+                               $found ||= $list if $list;  
+                               $processed++;
+                               if($processed == @full_hashes){
+                                   if( $found ){
+                                       $cb->($found);
+                                   }
+                                   else {
+                                       $cb->([]);
+                                   }
                                }
-                               else {
-                                   $cb->([]);
-                               }
-                           }
-                       };
+                           };
                        
-                       foreach my $full_hash (@full_hashes) {
-                           my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
-                           if (! defined $hash){
-                               $watcher->();
-                               next;
-                           }
+                           foreach my $full_hash (@full_hashes) {
+                               my $hash = first { $_->{hash} eq  $full_hash} @$hashes;
+                               if (! defined $hash){
+                                   $watcher->();
+                                   next;
+                               }
     
-                           my $list = first { $hash->{list} eq $_ } @$lists;
-                           if (defined $hash && defined $list) {
-                               log_debug2("Match: $full_hash");
-                               $watcher->($hash->{list});
-                           }
+                               my $list = first { $hash->{list} eq $_ } @$lists;
+                               if (defined $hash && defined $list) {
+                                   log_debug2("Match: $full_hash");
+                                   $watcher->($hash->{list});
+                               }
                            }
                         });
                     }
@@ -479,8 +469,8 @@ sub BUILD {
     my $self = shift;
     eval "use ".$self->log_class.";";
     die $@ if $@;
-    if( $self->data && $self->data_filepath ){
-        die "Available only one parameter data or data_filepath";
+    if( $self->data ){
+        die "Parameter 'data' is unavailable from constructor";
     }
     $self->data( AnyEvent::Net::SafeBrowsing3::Data->new( path => $self->data_filepath ));
     return $self;
@@ -1248,7 +1238,7 @@ sub request_full_hash {
             }
             my $cache_lifetime = $1;
             substr($data, 0, length($cache_lifetime."\n"), '');
-                        my $valid_to = $self->cache_time ? time() + $self->cache_time : time() + $cache_lifetime;
+            my $valid_to = $self->cache_time ? time() + $self->cache_time : time() + $cache_lifetime;
             
             # 2) handle empty answer
             if ($data eq '') {
@@ -1272,28 +1262,28 @@ sub request_full_hash {
                 # 4) check if there is metadata  
                 my $has_meta = 0;
                 if ($data =~ /^:m/) {
-                $has_meta = 1;
-                substr($data, 0, length(":m\n"),'');        
+                    $has_meta = 1;
+                    substr($data, 0, length(":m\n"),'');        
                 }
                 else {
-                substr($data, 0, length("\n"),''); 
+                    substr($data, 0, length("\n"),''); 
                 }
                 
                 # 5) unpack hashes (binary). length of each hash = $hash_size
                 for (my $i = 0; $i < $num_responses; ++$i) {
-                my $hash = substr($data, 0, $hash_size, ''); # кусаем байты!
-                push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
+                    my $hash = substr($data, 0, $hash_size, ''); 
+                    push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
                 }
                 
                 # 6) unpack metadata (2\nAA3\nBBBnext_text)
                 # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, so this metadata isn't stored anywhere.
                 if ($has_meta) {
-                while ($data =~ /^(\d+)/) {
-                    my $meta_len = $1;      
-                    my $meta = substr($data, length($meta_len."\n"), $meta_len);
-                    substr($data, 0,length($meta_len."\n".$meta), '');
-                    # push(@metadata, $meta);
-                }
+                    while ($data =~ /^(\d+)/) {
+                        my $meta_len = $1;      
+                        my $meta = substr($data, length($meta_len."\n"), $meta_len);
+                        substr($data, 0,length($meta_len."\n".$meta), '');
+                        # push(@metadata, $meta);
+                    }
                 }
             }
             
