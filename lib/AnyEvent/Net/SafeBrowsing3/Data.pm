@@ -20,7 +20,7 @@ AnyEvent::Net::SafeBrowsing3::Data - File storage object for any data
 
 =head1 DESCRIPTION
 
-File storage for any data, like Config YAML forrmat
+File storage for any data, like Config YAML format
 
 =cut
 
@@ -33,9 +33,9 @@ File storage for any data, like Config YAML forrmat
 
 =head2 new()
 
-Create a AnyEvent::Net::SafeBrowsing3::Tarantool object
+Create an AnyEvent::Net::SafeBrowsing3::Data object
 
-  my $storage = AnyEvent::Net::SafeBrowsing3::Tarantool->new({
+  my $storage = AnyEvent::Net::SafeBrowsing3::Data->new({
       path => '/tmp/datafile',
   });
 
@@ -52,11 +52,11 @@ Required. Path to file
 =cut
 
 has path   => (is => 'ro', isa => 'Str', required => 1);
-has config => (is => 'rw', isa => 'HashRef', default => sub {return {updated => {}, mac_keys => {client_key => '', wrapped_key => ''}, full_hash_errors => {}}});
+has config => (is => 'rw', isa => 'HashRef', default => sub {return {updated => {}, full_hash_errors => {}}});
 
 sub BUILD {
 	my $self = shift;
-	if( ! -f $self->path ){
+	if( ! -e $self->path ){
 		if(open(my $FILE,">",$self->path)){
 			YAML::DumpFile($self->path, $self->config);
 		}
@@ -64,6 +64,9 @@ sub BUILD {
 			die "Can't write to config file";
 		}
 	}
+    elsif( ! -f $self->path ) {
+        die $self->path . " is not a regular file";
+    }
 	else {
 		$self->config(YAML::LoadFile($self->path));
 	}
