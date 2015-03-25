@@ -66,7 +66,6 @@ function add_chunks_s3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k, rec in pairs(box.cjson.decode(json)) do
---print( space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix)
 		if not box.select(space, 0, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix) then
 			box.insert(space, rec.list, tonumber(rec.chunknum), tonumber(rec.chunk.add_chunknum), rec.chunk.prefix)
 			ret=ret+1
@@ -91,9 +90,10 @@ function del_chunks_s3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
-		for v in box.space[space].index[1]:iterator(box.index.LE, {rec.list, tonumber(rec.chunknum)}) do 
+		for v in box.space[space].index[1]:iterator(box.index.LE, rec.list, tonumber(rec.chunknum)) do 
 			if not v or box.unpack('i',v[1]) ~= tonumber(rec.chunknum) then break end
-			box.delete(space, {v[0], v[1], v[2], v[3], v[4]})
+			box.delete(space, {v[0], v[1], v[2], v[3]})
+            ret = ret + 1
 		end
 	end
 	return ret
@@ -103,9 +103,10 @@ function del_chunks_a3(space_num, json)
 	local space = tonumber(space_num)
 	local ret = 0
 	for k,rec in pairs(box.cjson.decode(json)) do
-		for v in box.space[space].index[1]:iterator(box.index.LE, {rec.list, tonumber(rec.chunknum)}) do 
+		for v in box.space[space].index[1]:iterator(box.index.LE, rec.list, tonumber(rec.chunknum)) do 
 			if not v or box.unpack('i',v[1]) ~= tonumber(rec.chunknum) then break end
-			box.delete(space, {v[0], v[1], v[2], v[3]})
+			box.delete(space, {v[0], v[1], v[2]})
+            ret = ret + 1
 		end
 	end
 	return ret
@@ -118,6 +119,7 @@ function del_full_hash3(space_num, json)
 		for v in box.space[space].index[1]:iterator(box.index.LE, {rec.list, tonumber(rec.chunknum)}) do 
 			if not v or box.unpack('i',v[1]) ~= tonumber(rec.chunknum) then break end
 			box.delete(space, {v[0], v[1], v[2]})
+            ret = ret + 1
 		end
 	end
 	return ret
