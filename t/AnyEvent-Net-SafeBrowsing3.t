@@ -1,19 +1,19 @@
 # Before `make install' is performed this script should be runnable with
-# `make test'. After `make install' it should work as `perl AnyEvent-Net-SafeBrowsing2.t'
+# `make test'. After `make install' it should work as `perl AnyEvent-Net-SafeBrowsing3.t'
 
 #########################
 
 
 use List::Util qw(first);
 use Test::More qw(no_plan);
-BEGIN { use_ok('AnyEvent::Net::SafeBrowsing2') };
+BEGIN { use_ok('AnyEvent::Net::SafeBrowsing3') };
 
-require_ok( 'AnyEvent::Net::SafeBrowsing2' );
+require_ok( 'AnyEvent::Net::SafeBrowsing3' );
 
 
 #########################
 
-my $gsb = AnyEvent::Net::SafeBrowsing2->new( server => 'test', key => 'test', );
+my $gsb = AnyEvent::Net::SafeBrowsing3->new( server => 'test', key => 'test', );
 
 # From Google API doc, prefix
 is( length $gsb->prefix('abc'), 32, 'Prefix length is 32');
