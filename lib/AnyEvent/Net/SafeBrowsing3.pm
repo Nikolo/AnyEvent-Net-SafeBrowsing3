@@ -559,7 +559,7 @@ sub process_update_data {
             $add_range_info = $1 . " $list";
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
             if( @$nums ){
-                $self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)});
+                $self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub { $_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
                 # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
                 # chunknums are not storing in FULL_HASHES space any more
                 # Delete full hash as well
@@ -574,7 +574,7 @@ sub process_update_data {
             log_debug1("Delete Sub Chunks: $1");
 
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
-            $self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {}) if @$nums;
+            $self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
         }
         elsif ($line =~ /r:pleasereset/) {
             unless( $list ){
@@ -864,6 +864,7 @@ sub parse_data {
     
     $self->storage->add_chunks_a($bulk_insert_a, $watcher) if @$bulk_insert_a;
     $self->storage->add_chunks_s($bulk_insert_s, $watcher) if @$bulk_insert_s; 
+    $cb->(0) if !@$bulk_insert_a && !@$bulk_insert_s;
     
     return;
 }
