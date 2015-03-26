@@ -234,7 +234,7 @@ sub update {
                         my $more_than_rest = $rest_request_length - length($a_range) - length($prefix);
                         if( $more_than_rest < 0 ){
                             die "Bad a_range format" unless $a_range =~ /(\d+)$/;
-			    my $last_id = "-".$1;
+                            my $last_id = "-".$1;
                             substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
                             $a_range =~ s/[,\-][^,\-]*$/$last_id/;
                         }
@@ -244,29 +244,29 @@ sub update {
                     }
                     if ($s_range ne '' ){
                         my $prefix = ($a_range ne '' ? ":" : "")."s:";
-			my $min_size;
-			my $last_id;
+                        my $min_size;
+                        my $last_id;
                         if($s_range =~ /[,\-]/){
-			    # more than one id
-			    die "Bad a_range format" unless $s_range =~ /^(\d+).*(\d+)$/;
-			    my $first_id = $1;
-			    $last_id = "-".$2;
-			    $min_size = length($prefix) + length($first_id) + length($last_id);
-			}
-			else{
-			    $min_size = length($prefix) + length($s_range);
-			}
-			if( $min_size < $rest_request_length ){
-			    # min_size less than rest_length
-			    my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
-			    if( $more_than_rest < 0 ){
-			        substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-				$s_range =~ s/[,\-][^,\-]*$/$last_id/;
-			    }
-			    my $chunks_list = $prefix.$s_range;
-			    $rest_request_length -= length($chunks_list);
-			    $body .= $chunks_list;
-			}
+                            # more than one id
+                            die "Bad a_range format" unless $s_range =~ /^(\d+).*(\d+)$/;
+                            my $first_id = $1;
+                            $last_id = "-".$2;
+                            $min_size = length($prefix) + length($first_id) + length($last_id);
+                        }
+                        else{
+                            $min_size = length($prefix) + length($s_range);
+                        }
+                        if( $min_size < $rest_request_length ){
+                            # min_size less than rest_length
+                            my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
+                            if( $more_than_rest < 0 ){
+                                substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
+                                $s_range =~ s/[,\-][^,\-]*$/$last_id/;
+                            }
+                            my $chunks_list = $prefix.$s_range;
+                            $rest_request_length -= length($chunks_list);
+                            $body .= $chunks_list;
+                        }
                     }
                     $body .= "\n";
                     die "Request length more than $max_request_length: ".length( $body ) if length( $body ) > $max_request_length;
