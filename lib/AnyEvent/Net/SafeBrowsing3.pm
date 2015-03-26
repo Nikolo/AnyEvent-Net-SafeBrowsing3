@@ -222,16 +222,37 @@ sub update {
                     #     googpub-phish-shavar;a:1-5
                     #     googpub-phish-shavar;
 
-                    my $chunks_list = '';
+                    my $max_request_length = 4096;
+                    my $rest_request_length = $max_request_length;
+                    $rest_request_length -= 1;             # symbol \n in end of body
+                    
+                    my $body = "$item;";
+                    $rest_request_length -= length($body);
+
                     if ($a_range ne '') {
-                        $chunks_list .= "a:$a_range";
+                        my $prefix = "a:";
+                        my $more_than_rest = $rest_request_length - length($a_range) - length($prefix);
+                        if( $more_than_rest < 0 ){
+                            substr($a_range, $more_than_rest, -$more_than_rest, '');
+                            $a_range =~ s/,[^,]*$//;
+                        }
+                        my $chunks_list = $prefix.$a_range;
+                        $rest_request_length -= length($chunks_list);
+                        $body .= $chunks_list;
                     }
-                    if ($s_range ne '') {
-                        $chunks_list .= ":" if ($a_range ne '');
-                        $chunks_list .= "s:$s_range";
+                    if ($s_range ne '' && $rest_request_length > 3 ) { # 3 = length of separator + prefix
+                        my $prefix = ($a_range ne '' ? ":" : "")."s:";
+                        my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
+                        if( $more_than_rest < 0 ){
+                            substr($s_range, $more_than_rest, -$more_than_rest, '');
+                            $s_range =~ s/,[^,]*$//;
+                        }
+                        my $chunks_list = $prefix.$s_range;
+                        $rest_request_length -= length($chunks_list);
+                        $body .= $chunks_list;
                     }
-                    my $body .= "$item;$chunks_list";
                     $body .= "\n";
+                    die "Request length more than $max_request_length: ".length( $body ) if length( $body ) > $max_request_length;
 
                     # request URL
                     my $url = $self->server . "downloads?client=api&key=" . $self->key
