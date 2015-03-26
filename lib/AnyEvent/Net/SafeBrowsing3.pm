@@ -234,9 +234,9 @@ sub update {
                         my $more_than_rest = $rest_request_length - length($a_range) - length($prefix);
                         if( $more_than_rest < 0 ){
                             die "Bad a_range format" unless $a_range =~ /(\d+)$/;
-			    my $last_id = $1;
+			    my $last_id = "-".$1;
                             substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                            $a_range =~ s/[^,\-]*$/$last_id/;
+                            $a_range =~ s/[,\-][^,\-]*$/$last_id/;
                         }
                         my $chunks_list = $prefix.$a_range;
                         $rest_request_length -= length($chunks_list);
@@ -261,7 +261,7 @@ sub update {
 			    my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
 			    if( $more_than_rest < 0 ){
 			        substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-				$s_range =~ s/[^,\-]*$/$last_id/;
+				$s_range =~ s/[,\-][^,\-]*$/$last_id/;
 			    }
 			    my $chunks_list = $prefix.$s_range;
 			    $rest_request_length -= length($chunks_list);
