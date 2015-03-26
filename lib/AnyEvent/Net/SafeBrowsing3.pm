@@ -245,7 +245,7 @@ sub update {
                     if ($s_range ne '' ){
                         my $prefix = ($a_range ne '' ? ":" : "")."s:";
 			my $min_size;
-			my $$last_id;
+			my $last_id;
                         if($s_range =~ /[,\-]/){
 			    # more than one id
 			    die "Bad a_range format" unless $s_range =~ /^(\d+).*(\d+)$/;
