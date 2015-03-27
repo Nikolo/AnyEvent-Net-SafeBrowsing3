@@ -236,7 +236,7 @@ sub update {
                             die "Bad a_range format" unless $a_range =~ /(\d+)$/;
                             my $last_id = "-".$1;
                             substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                            $a_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/$1$last_id/;
+                            $a_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
                         }
                         my $chunks_list = $prefix.$a_range;
                         $rest_request_length -= length($chunks_list);
@@ -248,7 +248,7 @@ sub update {
                         my $last_id;
                         if($s_range =~ /[,\-]/){
                             # more than one id
-                            die "Bad a_range format" unless $s_range =~ /^(\d+).*(\d+)$/;
+                            die "Bad a_range format" unless $s_range =~ /^(\d+).*?(\d+)$/;
                             my $first_id = $1;
                             $last_id = "-".$2;
                             $min_size = length($prefix) + length($first_id) + length($last_id);
@@ -261,7 +261,7 @@ sub update {
                             my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
                             if( $more_than_rest < 0 ){
                                 substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                                $s_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/$1$last_id/;
+                                $s_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
                             }
                             my $chunks_list = $prefix.$s_range;
                             $rest_request_length -= length($chunks_list);
