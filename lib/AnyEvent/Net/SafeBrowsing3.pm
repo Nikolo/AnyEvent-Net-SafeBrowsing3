@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.50';
+our $VERSION = '3.51';
 
 =head1 NAME
 
@@ -242,7 +242,7 @@ sub update {
                         else{
                             $min_size = length($prefix_s) + length($s_range);
                         }
-
+                    }
                     if ($a_range ne '') {
                         my $more_than_rest = $rest_request_length - length($a_range) - length($prefix) - ($s_range ? $prefix_s+$min_size : 0);
                         if( $more_than_rest < 0 ){
