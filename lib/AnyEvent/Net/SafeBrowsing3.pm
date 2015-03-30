@@ -46,7 +46,7 @@ AnyEvent::Net::SafeBrowsing3 - AnyEvent Perl extension for the Safe Browsing v3 
     storage => $storage,
   });
 
-  $sb->update(['goog-malware-shavar'], sub {warn "Next hope after ".$_[0], $cv->send()});
+  $sb->update(['goog-malware-shavar'], sub {warn "Next hop after ".$_[0], $cv->send()});
   $cv->recv;
 
   $storage->close();
@@ -58,8 +58,6 @@ AnyEvent::Net::SafeBrowsing3 implements the Google Safe Browsing v3 API.
 The library passes most of the unit tests listed in the API documentation. See the documentation (L<https://developers.google.com/safe-browsing/developers_guide_v3>) for more details about the failed tests.
 
 The Google Safe Browsing database must be stored and managed locally. L<AnyEvent::Net::SafeBrowsing3::Tarantool> uses Tarantool as the storage back-end. Other storage mechanisms (databases, memory, etc.) can be added and used transparently with this module.
-TODO
-The source code is available on github at L<https://github.com/juliensobrier/Net-Google-SafeBrowsing3>.
 
 If you do not need to inspect more than 10,000 URLs a day, you can use L<AnyEvent::Net::SafeBrowsing3::Lookup> with the Google Safe Browsing v3 Lookup API which does not require to store and maintain a local database. Use AnyEvent::Net::SafeBrowsing3::Empty for this one.
 
@@ -156,11 +154,12 @@ has default_retry=> (is => 'ro', isa => 'Int', default => 30);
 
 =head2 update()
 
-Perform a database update.
+Performs a database update.
 
+  $sb->update($list, $callback);
   $sb->update(['goog-malware-shavar', 'googpub-phish-shavar'], sub {});
 
-Return the time of next hope to update database.
+Returns the time of next hop to update database.
 
 This function can handle two lists at the same time. If one of the list should not be updated, it will automatically skip it and update the other one. It is faster to update two lists at once rather than doing them one by one.
 
@@ -312,13 +311,14 @@ sub update {
 
 =head2 force_update()
 
-Perform a force database update.
+Performs a force database update.
 
-  $sb->force_update('list', sub {});
+  $sb->force_update($list, $callback);
+  $sb->force_update(['goog-malware-shavar', 'googpub-phish-shavar'], sub {});
 
-Return the time of next hope to update db
+Returns the time of next hop to update db
 
-Be careful if you call this method as too frequent updates might result in the blacklisting of your API key.
+Be careful if you call this method  because too frequent updates might result in the blacklisting of your API key.
 
 Arguments
 
@@ -326,11 +326,11 @@ Arguments
 
 =item list
 
-Required. Update a specific list.
+Required. Reference to array that contains list names.
 
 =item callback
 
-Required. Callback function that will be called after db is updated.
+Required. Callback function that will be called after database is updated.
 
 =back
 
@@ -346,9 +346,9 @@ sub force_update {
 
 =head2 lookup()
 
-Lookup a URL against the Safe Browsing database.
+Lookups a URL against the Safe Browsing database.
 
-  my $match = $sb->lookup(list => 'name', url => 'http://www.gumblar.cn', cb => sub {});
+  my $match = $sb->lookup(list => ['goog-malware-shavar,googpub-phish-shavar'], url => 'http://www.gumblar.cn', cb => sub {});
 
 Returns the name of the list if there is any match, returns an empty string otherwise.
 
@@ -358,7 +358,7 @@ Arguments
 
 =item list
 
-Required. Lookup against a specific list names. Should be reference to array.
+Required. Lookup against specific list names. Should be a reference to array.
 
 =item url
 
@@ -366,7 +366,7 @@ Required. URL to lookup.
 
 =item callback
 
-Required. Callback function that will be called after db is updated.
+Required. Callback function that will be called after lookup is performed.
 
 =back
 
@@ -517,7 +517,11 @@ sub BUILD {
 
 =head2 param_for_http_req()
 
-Generate parameters for http request
+Generates parameters for http request
+
+  $self->param_for_http_req(timeout => $timeout, 
+                       tls_ctx => { verify => 1 },
+                       headers => { "user-agent" => $user_agent })
 
 =cut
 
@@ -530,20 +534,37 @@ sub param_for_http_req {
 
 Process the data received from server.
 
-data is response body.
-data format:
+Data is a response body and has format:
 
-n:1200
-i:googpub-phish-shavar
-u:cache.google.com/first_redirect_example
-sd:1,2
-i:acme-white-shavar
-u:cache.google.com/second_redirect_example
-ad:1-2,4-5,7
-sd:2-6
+  n:1200
+  i:googpub-phish-shavar
+  u:cache.google.com/first_redirect_example
+  sd:1,2
+  i:acme-white-shavar
+  u:cache.google.com/second_redirect_example
+  ad:1-2,4-5,7
+  sd:2-6
 
-And makes a list of redirection links (from "u:" tag).
+This subroutine makes a list of redirection links (from "u:" part).
 Then calls parse_data() function foreach item in redirection list.
+
+Example:
+
+  $self->process_update_data($data, $callback);
+
+Arguments
+
+=over 4
+
+=item data
+
+Required. Contains response body recieved from Safe Browsing Server.
+
+=item callback
+
+Required. Callback function that will be called after process_update_data() is performed.
+
+=back
 
 =cut
 
@@ -665,7 +686,27 @@ sub process_update_data {
 
 =head2 local_lookup_prefix()
 
-Lookup a prefix in the local database only.
+Lookups a prefix in the local database only.
+
+  $self->local_lookup_prefix(lists => $lists, prefix => 'abcd1234', cb => sub {...} );
+
+Arguments
+
+=over 4
+
+=item lists
+
+Required. Lookups against specific list names. Should be a reference to array.
+
+=item prefix
+
+Optional. Hex string representing most significant 8 bytes of a full-length, 256-bit hash.
+
+=item cb
+
+Required. Callback function that will be called after local_lookup_prefix() is finished.
+
+=back
 
 =cut
 
@@ -713,9 +754,9 @@ sub local_lookup_prefix {
 
 =head2 local_lookup()
 
-Lookup a URL against the local Safe Browsing database URL. This should be used for debugging purpose only. See the lookup for normal use.
+Lookups a URL against the local Safe Browsing database URL. This should be used for debugging purpose only. See the lookup for normal use.
 
-  my $match = $sb->local_lookup(url => 'http://www.gumblar.cn');
+  my $match = $sb->local_lookup(list => ['goog-malware-shavar,googpub-phish-shavar'], url => 'http://www.gumblar.cn');
 
 Returns the name of the list if there is any match, returns an empty string otherwise.
 
@@ -725,15 +766,11 @@ Arguments
 
 =item list
 
-Required. Lookup against a specific list.
+Required. Lookups against specific list names. Should be a reference to array.
 
 =item url
 
 Required. URL to lookup.
-
-=item callback
-
-Required. Callback function that will be called after db is updated.
 
 =back
 
@@ -744,9 +781,6 @@ sub local_lookup {
     my $lists           = $args{list}       ||  '';
     my $url             = $args{url}        or return '';
 
-    my @lists = @{$self->{list}};
-    @lists = @{[$args{list}]} if ($lists ne '');
-    
     # TODO: create our own URI management for canonicalization
     # fix for http:///foo.com (3 ///)
     $url =~ s/^(https?:\/\/)\/+/$1/;
@@ -763,7 +797,10 @@ sub local_lookup {
     # returns a reference to array of add chunks to callback
     
     foreach my $prefix (@full_hashes_prefix) {
-        my @matches = $self->local_lookup_prefix(lists => [@lists], prefix => sprintf("%x", unpack('N', $prefix)), cb => sub { return @{+shift}; });
+        my @matches = $self->local_lookup_prefix(
+            lists => $lists,
+            prefix => sprintf("%x", unpack('N', $prefix)), 
+            cb => sub { return @{+shift}; });
         return $matches[0]->{list} . " " . $matches[0]->{prefix} if (scalar @matches > 0);
     }
 
@@ -772,7 +809,7 @@ sub local_lookup {
 
 =head2 update_error()
 
-Handle server errors during a database update.
+Handles server errors during a database update.
 
 =cut
 
@@ -798,26 +835,39 @@ sub update_error {
 }
 
 
-=head2 parse_data
+=head2 parse_data()
 
-Parse data from a redirection.
-Data comes in ProtoBuf format
+Parses data came from a redirection.
+Data is in binary - some protobuf structures in trail. Each protobuf structure has format:
 
-parse_data(
-      data => $data, 
-      list => $list, 
-      cb => sub {...})
+  BODY      = (UINT32 CHUNKDATA)+
+  UINT32    = Unsigned 32-bit integer in network byte order.    => length of following data fragment which must be unpacked as Protobuf
+  CHUNKDATA = Encoded ChunkData protocol message, see below.    => this must be unpacked as Protobuf
 
-ARGUMENTS:
-   $data - response body from redirect link. contains binary data - some protobuf structs. each struct has format:
-     -----------------------------------------------------------
-     BODY      = (UINT32 CHUNKDATA)+
-     UINT32    = Unsigned 32-bit integer in network byte order.    => length of following data fragment which must be unpacked as Protobuf
-     CHUNKDATA = Encoded ChunkData protocol message, see below.    => this must be unpacked as Protobuf
-     -----------------------------------------------------------
- 
-   $lis - list name (available list types: goog-malware-shavar, goog-regtest-shavar, goog-whitedomain-shavar, googpub-phish-shavar)
-   $cb - callback function
+This function unpacks each chunkdata and then calls parse_a() or parse_s() for further parsing.
+Stores results from parse_a() and parse_s() in storage. 
+
+Example:
+
+  $self->parse_data(data => $data, list => 'goog-malware-shavar', cb => sub {...})
+
+Arguments
+
+=over 4
+
+=item data
+
+Optional. Contains response body from redirect link in binary - some protobuf structures.
+
+=item list
+
+Optional. Contains list name (eg.: 'goog-malware-shavar', 'googpub-phish-shavar').
+
+=item cb
+
+Required. Callback function that will be called after  parse_data() is finished.
+
+=back
 
 =cut
 
@@ -898,16 +948,42 @@ sub parse_data {
     return;
 }
 
-=head2 parse_s
+=head2 parse_s()
 
-Unpack sub prefixes from protobuf structure and returns a list of these prefix as hex strings
+Unpacks sub prefixes from protobuf structure and returns a list of these prefixes (represents prefixes as hex strings).
 
-parse_s(
-   value => encoded_hashes,
-   add_chunknums => $add_numbers,  # ARRAYREF
-   hash_length => 4)               # 4 or 32
+  my @data = $self->parse_s(value => $encoded_hashes, add_chunknums => $add_numbers, hash_length => 4);
+  use Data::Dumper;
+  print Dumper(\@data);
+  # $VAR1 = [
+  #           {
+  #             'add_chunknum' => 123456,
+  #             'prefix' => '1234abcd'
+  #           },
+  #           {
+  #             'add_chunknum' => 98765,
+  #             'prefix' => 'eeff1122'
+  #           },
+  #           ...
+  #        ]
 
-OUTPUT: @data = ( {add_chunknum => 123456, prefix => prefix1}, {add_chunknum => 456123, prefix => prefix2}, ...)
+Arguments
+
+=over 4
+
+=item value
+
+Prefixes in binary one by another.
+
+=item add_chunknums
+
+Reference to array of add-chunk numbers. Each add-chunk number corresponds to prefix with the same sequence number. 
+
+=item hash_length
+
+Length in bytes of each prefix. May be 4 or 32 (according to protocol).  
+
+=back
 
 =cut
 
@@ -935,15 +1011,33 @@ sub parse_s {
 }
 
 
-=head parse_a
+=head2 parse_a()
 
-Unpack add prefixes from protobuf structure and returns a list of these prefix as hex strings
+Unpacks add prefixes from protobuf structure and returns a list of these prefix as hex strings
 
-parse_a(
-   value => encoded_hashes,  # = hashes
-   hash_length => 4)         # = prefix_type, 4 or 32
+  my @data = $self->parse_a(value => $encoded_hashes, hash_length => 4);
+  use Data::Dumper;
+  print Dumper(\@data);
 
-OUTPUT: @data = (prefix1, prefix2, ...)
+  # $VAR1 = [
+  #           '1234absd',
+  #           'eeddab65',
+  #           ...
+  #         ]
+
+Arguments
+
+=over 4
+
+=item value
+
+Prefixes in binary one by another.
+
+=item hash_length
+
+Length in bytes of each prefix. May be 4 or 32 (according to protocol).  
+
+=back
 
 =cut
 
@@ -964,18 +1058,34 @@ sub parse_a {
 
 =head2 canonical_domain()
 
-Find all canonical domains a domain.
+Find all canonical domains for given hostname.
+
+These domains are:
+ 1. the exact hostname in the URL
+ 2. up to 4 hostnames formed by starting with the last 5 components and successively removing the leading component.
+ 
+This subroutine prepares given hostname before getting domains:
+ 1. Remove all leading and trailing dots.
+ 2. Replace consecutive dots with a single dot.
+
+Example:
+
+  use URI;
+  my $host = URI->new('http://a.b.c..d.e.f./1/2.html?param=1')->host; # 'a.b.c..d.e.f.' 
+  my @domains = $self->canonical_domain($host);
+  print join "\n", @domains;
+
+  # 'a.b.c.d.e.f.g',
+  # 'c.d.e.f.g',
+  # 'd.e.f.g',
+  # 'e.f.g',
+  # 'f.g'
 
 =cut
 
 sub canonical_domain {
     my ($self, $domain)     = @_;
     
-    # requirements
-    #
-    #   PREPARE DOMAIN:
-    # 1. Remove all leading and trailing dots.
-    # 2. Replace consecutive dots with a single dot.
     # 3. If the hostname can be parsed as an IP address, normalize it to 4 dot-separated decimal values. 
     # The client should handle any legal IP- address encoding, including octal, hex, and fewer than 4 components.
     # see: http://habrahabr.ru/post/69587/
@@ -983,11 +1093,6 @@ sub canonical_domain {
     # (TODO in Clicker) 
     # 4. Lowercase the whole string.
     # (it's just lowercased by URI->host)
-    # 
-    #   CREATE A LIST OF DOMAIN VARIANTS:
-    # @domains contains:
-    # 1. the exact hostname in the URL
-    # 2. up to 4 hostnames formed by starting with the last 5 components and successively removing the leading component.
     
     $domain =~ s<^\.*([^.].*[^.])\.*$><$1>; # prepare 1
     $domain =~ s<\.{2,}><\.>g;              # prepare 2
@@ -1010,28 +1115,48 @@ sub canonical_domain {
 
 =head2 canonical_path()
 
-Find all canonical paths for a URL.
-input param: uri->path_query
-example: /1/2.html?param=1
-(with leading slash)
+Finds all canonical path combinations for a given path.
+
+These path combinations are:
+ 1. the exact path of the URL, including query parameters
+ 2. the exact path of the URL, without query parameters
+ 3. the 4 paths formed by starting at the root (/) and successively appending path components, including a trailing slash.
+ 
+This subroutine prepares given path before getting combinations:
+ 1. replaces "/./" with "/", 
+ 2. replaces runs of consecutive slashes with a single slash character.
+ 3. removes "/../" along with the preceding path component. 
+ (Path canonicalizations is not applied to the query parameters)
+
+Example:
+
+  use URI;
+  my $adr = 'http://a.b.c/qqq/./2//3/4//6///8//5.html?param=1';
+  my $path_query = URI->new($adr)->path_query;    # '/qqq/./2//3/4//6///8//5.html?param=1'
+  my @paths = $self->canonical_path($path_query);
+  print join "\n", @paths;
+
+  # 'qqq/2/3/4/6/8/5.html?param=1',
+  # 'qqq/2/3/4/6/8/5.html',
+  # 'qqq/',
+  # 'qqq/2/',
+  # 'qqq/2/3/',
+  # 'qqq/2/3/4/' 
+
+Arguments
+
+=over 4
+
+=item path_query
+
+Path + query components of uri (like returns function path_query() from module URI). For example /1/2.html?param=1 (with leading slash).
+
+=back
 
 =cut
 
 sub canonical_path {
     my ($self, $path_query) = @_;
-    
-    # requirement
-    #
-    #   PREPARE PATH
-    # 1. replace "/./" with "/", 
-    # 2. Replace runs of consecutive slashes with a single slash character.
-    # 3. remove "/../" along with the preceding path component. 
-    # Do not apply path canonicalizations to the query parameters.
-    #
-    #   CREATE A LIST OF PATH VARIANTS
-    # 1. the exact path of the URL, including query parameters
-    # 2. the exact path of the URL, without query parameters
-    # 3. the 4 paths formed by starting at the root (/) and successively appending path components, including a trailing slash.
     
     my ($path, $query) = split('\?', $path_query); 
     
@@ -1064,6 +1189,18 @@ sub canonical_path {
 
 Find all possible combinations of domain + path  for a given URL.
 
+  my @urls = $self->canonical('http://a.b.c/1/2.html?param=1');
+  print join "\n", @urls;
+
+  # a.b.c/1/2.html?param=1
+  # a.b.c/1/2.html
+  # a.b.c/
+  # a.b.c/1/
+  # b.c/1/2.html?param=1
+  # b.c/1/2.html
+  # b.c/
+  # b.c/1/
+
 =cut
 
 sub canonical {
@@ -1083,7 +1220,7 @@ sub canonical {
 
 =head2 canonical_uri()
 
-Create a canonical URI.
+Creates a canonical URI.
 
 NOTE: URI cannot handle all the test cases provided by Google. This method is a hack to pass most of the test. A few tests are still failing. The proper way to handle URL canonicalization according to Google would be to create a new module to handle URLs. However, I believe most real-life cases are handled correctly by this function.
 
@@ -1167,7 +1304,7 @@ sub canonical_uri {
 
 =head2 full_hashes()
 
-Return all possible full hashes for a URL.
+Returns all possible full hashes (sha256) for a given URL.
 
 =cut
 
@@ -1186,13 +1323,31 @@ sub full_hashes {
 
 =head2 request_full_hash()
 
-Request full hashes for specific prefixes from Google.
+Requests for full hashes for specific prefixes from Google.
 
-IN: 
-- ref to array of hash-prefixes in binary
-- cb
-OUT to cb: 
-- list of full hashes [ {list => listname1, hash => hash1, timestamp => valid_to1},  {list => listname2, hash => hash2, timestamp => valid_to2} ]
+  $self->request_ful_hashes( prefixes => $pref, cb => sub {...} ); 
+
+Arguments
+
+=over 4
+
+=item prefixes
+
+Reference to array of hash-prefixes in binary
+
+=item cb
+
+Callback function that will be called after request_full_hash() is finished.
+
+=back
+
+Returns a reference to list of full hashes in callback:
+
+  [ 
+    {list => listname1, hash => hash1, timestamp => valid_to1}, 
+    {list => listname2, hash => hash2, timestamp => valid_to2},
+    ...
+  ]
 
 =cut
 
@@ -1289,7 +1444,8 @@ sub request_full_hash {
             }
             
             while (length $data > 0) {
-               # 3) unpack list name, length of one hash and number of hashes in response (goog-malware-shavar:32:2:m)
+               # 3) unpack list name, length of one hash and number of hashes in response
+               #    (goog-malware-shavar:32:2:m)
                 if ($data !~ /^([a-z\-]+):(\d+):(\d+)/) {
                     log_error("error in parsing full hash response");
                     $cb->([]);
@@ -1315,7 +1471,8 @@ sub request_full_hash {
                 }
                 
                 # 6) unpack metadata (2\nAA3\nBBBnext_text)
-                # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, so this metadata isn't stored anywhere.
+                # it's binary, in protobuf format. now it's not neccessary to unpack protobuf messages, 
+                # so this metadata isn't stored anywhere.
                 if ($has_meta) {
                     while ($data =~ /^(\d+)/) {
                         my $meta_len = $1;      
@@ -1390,11 +1547,12 @@ Google Safe Browsing v3 API: L<https://developers.google.com/safe-browsing/devel
 
 =head1 AUTHOR
 
-Nikolay Shulyakovskiy, E<lt>shulyakovskiy@mail.ruE<gt> or E<lt>shulyakovskiy@yandex.ruE<gt>
+Nikolay Shulyakovskiy, E<lt>shulyakovskiy@mail.ruE<gt> or E<lt>shulyakovskiy@yandex.ruE<gt>; 
+Ekaterina Klishina, E<lt>e.klishina@mail.ruE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2015 by Nikolay Shulyakovskiy
+Copyright (C) 2015 by Nikolay Shulyakovskiy, Ekaterina Klishina
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,
