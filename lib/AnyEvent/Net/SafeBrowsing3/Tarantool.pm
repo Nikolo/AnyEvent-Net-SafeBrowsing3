@@ -340,42 +340,22 @@ sub get_full_hashes {
 sub add_chunks_s {
 	my ($self, $chunks, $cb) = @_;
 	ref $cb eq 'CODE' || die "cb arg is required and must be CODEREF";
-        my $iters = int(scalar(@$chunks)/1000)+1;
-        my $ret_stat = 0;
-        my $watcher = sub {
-                my $ret = shift;
-                $ret_stat ||= $ret;
-                $iters--;
-                $cb->($ret_stat) unless $iters;
-        };
-        for(my $i = 0; $i < $iters; $i++){
-                $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode(@$chunks[1000*$i..1000*($i+1)-1])], {in => 'pp', out => 'p'}, sub {
-                        my ($result, $error) = @_;
-                        log_error( "Tarantool error: ", $error ) if $error;
-                        $watcher->($error ? 1 : 0);
-                });
-        }
+        $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+                my ($result, $error) = @_;
+                log_error( "Tarantool error: ", $error ) if $error;
+                $watcher->($error ? 1 : 0);
+        });
         log_debug1("STORED s chunks");	
 }
 
 sub add_chunks_a {
 	my ($self, $chunks, $cb) = @_;
 	ref $cb eq 'CODE' or die "cb arg is required and must be CODEREF";
-        my $iters = int(scalar(@$chunks)/1000)+1;
-        my $ret_stat = 0;
-        my $watcher = sub {
-                my $ret = shift;
-                $ret_stat ||= $ret;
-                $iters--;
-                $cb->($ret_stat) unless $iters;
-        };
-        for(my $i = 0; $i < $iters; $i++){
-                $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode(@$chunks[1000*$i..1000*($i+1)-1])], {in => 'pp', out => 'p'}, sub {
-                        my ($result, $error) = @_;
-                        log_error( "Tarantool error: ", $error ) if $error;
-                        $watcher->($error ? 1 : 0);
-                });
-        }
+        $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+                my ($result, $error) = @_;
+                log_error( "Tarantool error: ", $error ) if $error;
+                $watcher->($error ? 1 : 0);
+        });
         log_debug1("STORED a chunks");	
 }
 

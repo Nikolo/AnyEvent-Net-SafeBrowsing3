@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.53';
+our $VERSION = '3.54';
 
 =head1 NAME
 
@@ -877,9 +877,20 @@ sub parse_data {
     my $list            = $args{list}       || '';
     my $cb              = $args{cb}     or die "Callback is required";
     
+    my $in_process=1;
+    my $have_error = 0;
+    my $watcher = sub {
+        my $err = shift;
+        $in_process--;
+        $have_error ||= $err;
+        log_debug2("Watcher parse: ".$in_process);
+        if(!$in_process){
+            $cb->($have_error);
+        }
+    };
+
     my $bulk_insert_a = [];
     my $bulk_insert_s = [];
-
     while (length $data > 0) {
         my $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
         my $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
@@ -920,21 +931,18 @@ sub parse_data {
         } 
 
         log_debug2(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), "OK");
+	if( @$bulk_insert_a > 1000 ){
+            ++$in_process;
+    	    $self->storage->add_chunks_a($bulk_insert_a, $watcher);
+	    $bulk_insert_a = [];
+	}
+	if( @$bulk_insert_s > 1000 ){
+            ++$in_process;
+    	    $self->storage->add_chunks_s($bulk_insert_s, $watcher);
+	    $bulk_insert_s = [];
+	}
     }
-
-    my $in_process = 0; # how many tables are in update (add, sub)
-    my $have_error = 0;
-
-    my $watcher = sub {
-        my $err = shift;
-        $in_process--;
-        $have_error ||= $err;
-        log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
-        if(!$in_process){
-            $cb->($have_error);
-        }
-    };
-    
+    $in_process--; 
     ++$in_process if @$bulk_insert_a;
     ++$in_process if @$bulk_insert_s;
     
