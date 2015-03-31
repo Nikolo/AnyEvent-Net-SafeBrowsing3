@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.55';
+our $VERSION = '3.56';
 
 =head1 NAME
 
@@ -244,7 +244,7 @@ sub update {
                         }
                     }
                     if ($a_range ne '') {
-                        my $more_than_rest = $rest_request_length - length($a_range) - length($prefix) - ($s_range ? $prefix_s+$min_size : 0);
+                        my $more_than_rest = $rest_request_length - length($a_range) - length($prefix) - ($s_range ? length($prefix_s)+$min_size : 0);
                         if( $more_than_rest < 0 ){
                             die "Bad a_range format" unless $a_range =~ /(\d+)$/;
                             my $last_id = "-".$1;
@@ -609,11 +609,17 @@ sub process_update_data {
             $add_range_info = $1 . " $list";
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
             if( @$nums ){
-                $self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub { $_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
-                # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
-                # chunknums are not storing in FULL_HASHES space any more
-                # Delete full hash as well
-                #$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
+                my $iters = int(scalar(@$nums)/1000)+1;
+                for( my $i = 0; $i < $iters; $i++){
+                    my $from = $i*1000;
+                    my $to = 1000*($i+1)-1;
+                    $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
+                    $self->storage->delete_add_chunks(chunknums => @$nums[$from..$to], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
+                    # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
+                    # chunknums are not storing in FULL_HASHES space any more
+                    # Delete full hash as well
+                    #$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
+                }
             }
         }
         elsif ($line =~ /sd:(\S+)$/) {
@@ -624,7 +630,15 @@ sub process_update_data {
             log_debug1("Delete Sub Chunks: $1");
 
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
-            $self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
+            if( @$nums ){
+                my $iters = int(scalar(@$nums)/1000)+1;
+                for( my $i = 0; $i < $iters; $i++){
+                    my $from = $i*1000;
+                    my $to = 1000*($i+1)-1;
+                    $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
+                    $self->storage->delete_sub_chunks(chunknums => @$nums[$from..$to], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
+                }
+            }
         }
         elsif ($line =~ /r:pleasereset/) {
             unless( $list ){
