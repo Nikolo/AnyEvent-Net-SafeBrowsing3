@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.57';
+our $VERSION = '3.58';
 
 =head1 NAME
 
@@ -609,10 +609,11 @@ sub process_update_data {
             $add_range_info = $1 . " $list";
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
             if( @$nums ){
-                my $iters = int(scalar(@$nums)/1000)+1;
+                my $chunk_size = 500;
+                my $iters = int(scalar(@$nums)/$chunk_size)+1;
                 for( my $i = 0; $i < $iters; $i++){
-                    my $from = $i*1000;
-                    my $to = 1000*($i+1)-1;
+                    my $from = $i*$chunk_size;
+                    my $to = $chunk_size*($i+1)-1;
                     $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
                     $self->storage->delete_add_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
                     # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
@@ -631,10 +632,11 @@ sub process_update_data {
 
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
             if( @$nums ){
-                my $iters = int(scalar(@$nums)/1000)+1;
+                my $chunk_size = 500;
+                my $iters = int(scalar(@$nums)/$chunk_size)+1;
                 for( my $i = 0; $i < $iters; $i++){
-                    my $from = $i*1000;
-                    my $to = 1000*($i+1)-1;
+                    my $from = $i*$chunk_size;
+                    my $to = $chunk_size*($i+1)-1;
                     $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
                     $self->storage->delete_sub_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
                 }
