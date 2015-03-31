@@ -349,7 +349,7 @@ sub add_chunks_s {
                 $cb->($ret_stat) unless $iters;
         };
         for(my $i = 0; $i < $iters; $i++){
-                $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+                $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode(@$chunks[1000*$i..1000*($i+1)-1])], {in => 'pp', out => 'p'}, sub {
                         my ($result, $error) = @_;
                         log_error( "Tarantool error: ", $error ) if $error;
                         $watcher->($error ? 1 : 0);
@@ -370,7 +370,7 @@ sub add_chunks_a {
                 $cb->($ret_stat) unless $iters;
         };
         for(my $i = 0; $i < $iters; $i++){
-                $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+                $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode(@$chunks[1000*$i..1000*($i+1)-1])], {in => 'pp', out => 'p'}, sub {
                         my ($result, $error) = @_;
                         log_error( "Tarantool error: ", $error ) if $error;
                         $watcher->($error ? 1 : 0);
