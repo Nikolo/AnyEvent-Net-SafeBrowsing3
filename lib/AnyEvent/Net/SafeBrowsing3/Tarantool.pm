@@ -343,7 +343,7 @@ sub add_chunks_s {
         $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
                 my ($result, $error) = @_;
                 log_error( "Tarantool error: ", $error ) if $error;
-                $watcher->($error ? 1 : 0);
+                $cb->($error ? 1 : 0);
         });
         log_debug1("STORED s chunks");	
 }
@@ -354,7 +354,7 @@ sub add_chunks_a {
         $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
                 my ($result, $error) = @_;
                 log_error( "Tarantool error: ", $error ) if $error;
-                $watcher->($error ? 1 : 0);
+                $cb->($error ? 1 : 0);
         });
         log_debug1("STORED a chunks");	
 }

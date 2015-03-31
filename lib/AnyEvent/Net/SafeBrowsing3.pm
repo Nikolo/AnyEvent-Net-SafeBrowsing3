@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.54';
+our $VERSION = '3.55';
 
 =head1 NAME
 
@@ -249,7 +249,7 @@ sub update {
                             die "Bad a_range format" unless $a_range =~ /(\d+)$/;
                             my $last_id = "-".$1;
                             substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                            $a_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
+                            $a_range =~ s/(?:((?:^|,)\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
                         }
                         my $chunks_list = $prefix.$a_range;
                         $rest_request_length -= length($chunks_list);
@@ -261,7 +261,7 @@ sub update {
                             my $more_than_rest = $rest_request_length - length($s_range) - length($prefix_s);
                             if( $more_than_rest < 0 ){
                                 substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                                $s_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
+                                $s_range =~ s/(?:((?:^|,)\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
                             }
                             my $chunks_list = $prefix_s.$s_range;
                             $rest_request_length -= length($chunks_list);
@@ -908,18 +908,18 @@ sub parse_data {
         my $chunk_num = $protobuf_data->chunk_number();
         my $chunk_type = $protobuf_data->chunk_type();
         my $hash_length = $protobuf_data->prefix_type() ? 32 : 4;
-    
+
         if ($chunk_type == 0) {
             # it is add chunk
-            my @data = $self->parse_a(value => $protobuf_data->hashes(), hash_length => $hash_length);
-            foreach my $item (@data) {
+            my $data = $self->parse_a(value => $protobuf_data->hashes(), hash_length => $hash_length);
+            foreach my $item (@$data) {
                 push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };    
             }       
         }
         elsif ($chunk_type == 1) {
             # it is sub chunk
-            my @data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
-            foreach my $item (@data) {
+            my $data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
+            foreach my $item (@$data) {
                 push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };    
             }
         }
@@ -930,7 +930,7 @@ sub parse_data {
             return;
         } 
 
-        log_debug2(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), "OK");
+        log_debug1(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), scalar(@$bulk_insert_a), ":", scalar(@$bulk_insert_s), "OK");
 	if( @$bulk_insert_a > 1000 ){
             ++$in_process;
     	    $self->storage->add_chunks_a($bulk_insert_a, $watcher);
@@ -994,7 +994,7 @@ Length in bytes of each prefix. May be 4 or 32 (according to protocol).
 
 sub parse_s {
     my ($self, %args)  = @_;
-    my $value          = $args{value}          or return ();      
+    my $value          = $args{value}          or return [{prefix => '', add_chunknum => ''}];
     my $add_chunknums  = $args{add_chunknums}  or return (); 
     my $hash_length    = $args{hash_length};
     
@@ -1012,7 +1012,7 @@ sub parse_s {
         log_debug3("parsed s-prefix : $add_chunknum : $prefix");
     }
 
-    return @data;
+    return \@data;
 }
 
 
@@ -1048,9 +1048,9 @@ Length in bytes of each prefix. May be 4 or 32 (according to protocol).
 
 sub parse_a {
     my ($self, %args)  = @_;
-    my $value          = $args{value}         or return ();
+    my $value          = $args{value}         or return [{prefix => ''}];
     my $hash_length    = $args{hash_length}; 
-    
+
     my @data = (); 
     
     while (length $value > 0) {
@@ -1058,7 +1058,7 @@ sub parse_a {
         push @data, { prefix => $prefix };
         log_debug3("parsed a-prefix : $prefix");
     }
-    return @data;
+    return \@data;
 }
 
 =head2 canonical_domain()
