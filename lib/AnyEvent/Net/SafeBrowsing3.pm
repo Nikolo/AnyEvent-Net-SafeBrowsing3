@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.56';
+our $VERSION = '3.57';
 
 =head1 NAME
 
@@ -614,7 +614,7 @@ sub process_update_data {
                     my $from = $i*1000;
                     my $to = 1000*($i+1)-1;
                     $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
-                    $self->storage->delete_add_chunks(chunknums => @$nums[$from..$to], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
+                    $self->storage->delete_add_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
                     # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
                     # chunknums are not storing in FULL_HASHES space any more
                     # Delete full hash as well
@@ -636,7 +636,7 @@ sub process_update_data {
                     my $from = $i*1000;
                     my $to = 1000*($i+1)-1;
                     $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
-                    $self->storage->delete_sub_chunks(chunknums => @$nums[$from..$to], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
+                    $self->storage->delete_sub_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
                 }
             }
         }
