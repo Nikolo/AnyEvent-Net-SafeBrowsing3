@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.51';
+our $VERSION = '3.52';
 
 =head1 NAME
 
@@ -877,15 +877,12 @@ sub parse_data {
     my $list            = $args{list}       || '';
     my $cb              = $args{cb}     or die "Callback is required";
     
-    my $protobuf_len = 0;
-    my $protobuf_data = '';
-    
     my $bulk_insert_a = [];
     my $bulk_insert_s = [];
 
     while (length $data > 0) {
-        $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
-        $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+        my $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
+        my $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
 
         # perl hash format of decoded protobuf data is 
         # (~ - for optional fields. they're available throught accessor):
