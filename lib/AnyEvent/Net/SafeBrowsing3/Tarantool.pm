@@ -125,10 +125,6 @@ sub BUILD {
 						fields => ['list', 'chunknum', 'prefix'],
 					},
 					1 => {
-						name => 'idx_a_list_num',
-						fields => ['list', 'chunknum'],
-					},
-					2 => {
 						name => 'idx_a_list_prefix',
 						fields => ['list', 'prefix'],
 					},
@@ -143,11 +139,7 @@ sub BUILD {
 						name => 'idx_s_uniq',
 						fields => ['list', 'chunknum', 'add_num', 'prefix'],
 					},
-					1 => {
-						name => 'idx_s_list_num',
-						fields => ['list', 'chunknum'],
-					},
-                                        2 => {
+                                        1 => {
 						name => 'idx_s_list_prefix',
 						fields => ['list', 'prefix'],
 					},
@@ -158,15 +150,7 @@ sub BUILD {
 				fields       => [qw/list chunknum hash timestamp/],
 				types        => [qw/STR  NUM STR  NUM/],
 				indexes      => {
-					0 => {
-						name => 'idx_s_uniq',
-						fields => ['list', 'chunknum', 'hash'],
-					},
-					1 => {
-						name => 'idx_s_list_num',
-						fields => ['list', 'chunknum'],
-					},
-                                        2 => {
+                                        0 => {
 						name => 'idx_s_list_hash',
 						fields => ['list', 'hash'],
 					},
@@ -229,7 +213,7 @@ sub delete_sub_chunks {
 	return;
 }
 
-# select tuples from a_chunks using index2 (list + prefix)
+# select tuples from a_chunks using index1 (list + prefix)
 # in callback returns reference to array of fields:
 # (list, chunknum, prefix)
 # $ret = [ {list => res1_list, chunknum => res1_chunknum, prefix => res1_prefix},
@@ -241,7 +225,7 @@ sub get_add_chunks {
 	my $list          = $args{'lists'}                           or die "lists arg is required";
 	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
 	
-	$self->dbh->slave->select('a_chunks', [map [$_, $prefix], @$list], {index => 2}, sub{
+	$self->dbh->slave->select('a_chunks', [map [$_, $prefix], @$list], {index => 1}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
@@ -259,7 +243,7 @@ sub get_add_chunks {
 	return;
 }
 
-# select tuples from s_chunks using index2 (list + prefix)
+# select tuples from s_chunks using index1 (list + prefix)
 # in callback returns reference to array of fields:
 # (list, chunknum, add_num, prefix)
 # $ret = [ {list => res1_list, chunknum => res1_chunknum, add_num => res1_add_num, prefix => res1_prefix},
@@ -270,7 +254,7 @@ sub get_sub_chunks {
 	my $prefix        = $args{prefix}                            or die "prefix arg is required";
 	my $list          = $args{'lists'}                           or die "lists arg is required";
 	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
-	$self->dbh->slave->select('s_chunks', [map [$_,$prefix], @$list], {index => 2}, sub{
+	$self->dbh->slave->select('s_chunks', [map [$_,$prefix], @$list], {index => 1}, sub{
 		my ($result, $error) = @_;
 		if( $error || !$result->{count} ){
 			log_error( "Tarantool error: ".$error ) if $error;
