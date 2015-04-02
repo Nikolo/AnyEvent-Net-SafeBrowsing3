@@ -403,11 +403,11 @@ sub lookup {
             
             # if any prefix matches with local database, check for full hashes stored locally
             # preliminary declarations
-            my $found = '';
+            my $found = [];
             my $processed = 0;
             my $watcher = sub {
                 my $list = shift;
-                $found ||= $list if $list;  
+                push @$found, $list if $list;  
                 $processed++;
                 if($processed == @$add_chunks){
                     if( $found ){
@@ -444,19 +444,20 @@ sub lookup {
                    else {
                        # ask Google for new hashes
                        # TODO: make sure we don't keep asking for the same over and over
-                        
                        $self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
                            my $hashes = shift;
-                           log_debug1( "Full hashes: ", $hashes);
+                           my $debug_string = '';
+                           for my $line (@$hashes) { $debug_string .= "hash:" . unpack('H*', $line->{hash}) . " list:" . $line->{list} . " timestamp:". $line->{timestamp} . " " }
+                           log_debug1( "Full hashes: ". $debug_string);
                            $self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
                        
                            # check for new full hashes
                            # preliminary declaration
                            $processed = 0;
-                           $found = '';
+                           $found = [];
                            my $watcher = sub {
                                my $list = shift;
-                               $found ||= $list if $list;  
+                               push @$found, $list if $list;  
                                $processed++;
                                if($processed == @full_hashes){
                                    if( $found ){
@@ -477,7 +478,7 @@ sub lookup {
     
                                my $list = first { $hash->{list} eq $_ } @$lists;
                                if (defined $hash && defined $list) {
-                                   log_debug2("Match: $full_hash");
+                                   log_debug2("Match: " . unpack('H*', $full_hash));
                                    $watcher->($hash->{list});
                                }
                            }
@@ -1188,7 +1189,8 @@ sub canonical_path {
 
     $path =~ s<^\/><>;
     
-    my @paths = ($path, '');
+    my @paths = ('');
+    push @paths, $path if $path;
     push @paths, "$path?$query" if $query;
     
     my $prev = '';
@@ -1414,9 +1416,9 @@ sub request_full_hash {
     #     123456781234  => chain of prefixes in binary
     
     my $prefix_list = join('', @$prefixes);
-    my $header = "$size:" . scalar @$prefixes * $size;
+    my $header = "$size:" . (@$prefixes  * $size);
     my $body = $header."\n".$prefix_list;
-    log_debug1( "Full hash data: ". $body);
+    log_debug1( "Full hash data: $header\\n". unpack( 'H*', $prefix_list));
     
     http_post( $url, $body, %{$self->param_for_http_req}, sub {
         my ($data, $headers) = @_; 
@@ -1453,7 +1455,7 @@ sub request_full_hash {
             }
             my $cache_lifetime = $1;
             substr($data, 0, length($cache_lifetime."\n"), '');
-            my $valid_to = $self->cache_time ? time() + $self->cache_time : time() + $cache_lifetime;
+            my $valid_to = $self->cache_time ? (time() + $self->cache_time) : (time() + $cache_lifetime);
             
             # 2) handle empty answer
             if ($data eq '') {
