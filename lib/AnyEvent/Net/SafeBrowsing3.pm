@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.19';
+our $VERSION = '3.59';
 
 =head1 NAME
 
@@ -227,42 +227,43 @@ sub update {
                     
                     my $body = "$item;";
                     $rest_request_length -= length($body);
-
-                    if ($a_range ne '') {
-                        my $prefix = "a:";
-                        my $more_than_rest = $rest_request_length - length($a_range) - length($prefix);
-                        if( $more_than_rest < 0 ){
-                            die "Bad a_range format" unless $a_range =~ /(\d+)$/;
-                            my $last_id = "-".$1;
-                            substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                            $a_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
-                        }
-                        my $chunks_list = $prefix.$a_range;
-                        $rest_request_length -= length($chunks_list);
-                        $body .= $chunks_list;
-                    }
+                    my $prefix = "a:";
+                    my $prefix_s = ($a_range ne '' ? ":" : "")."s:";
+                    my $min_size;
+                    my $last_id;
                     if ($s_range ne '' ){
-                        my $prefix = ($a_range ne '' ? ":" : "")."s:";
-                        my $min_size;
-                        my $last_id;
                         if($s_range =~ /[,\-]/){
                             # more than one id
                             die "Bad a_range format" unless $s_range =~ /^(\d+).*?(\d+)$/;
                             my $first_id = $1;
                             $last_id = "-".$2;
-                            $min_size = length($prefix) + length($first_id) + length($last_id);
+                            $min_size = length($prefix_s) + length($first_id) + length($last_id);
                         }
                         else{
-                            $min_size = length($prefix) + length($s_range);
+                            $min_size = length($prefix_s) + length($s_range);
                         }
+                    }
+                    if ($a_range ne '') {
+                        my $more_than_rest = $rest_request_length - length($a_range) - length($prefix) - ($s_range ? length($prefix_s)+$min_size : 0);
+                        if( $more_than_rest < 0 ){
+                            die "Bad a_range format" unless $a_range =~ /(\d+)$/;
+                            my $last_id = "-".$1;
+                            substr($a_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
+                            $a_range =~ s/(?:((?:^|,)\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
+                        }
+                        my $chunks_list = $prefix.$a_range;
+                        $rest_request_length -= length($chunks_list);
+                        $body .= $chunks_list;
+                    }
+		    if ($s_range ne '' ){
                         if( $min_size < $rest_request_length ){
                             # min_size less than rest_length
-                            my $more_than_rest = $rest_request_length - length($s_range) - length($prefix);
+                            my $more_than_rest = $rest_request_length - length($s_range) - length($prefix_s);
                             if( $more_than_rest < 0 ){
                                 substr($s_range, $more_than_rest-length($last_id), -$more_than_rest+length($last_id), '');
-                                $s_range =~ s/(?:(,\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
+                                $s_range =~ s/(?:((?:^|,)\d+)(\-\d+)?,\d*|\-\d*)$/($1||"").$last_id/e;
                             }
-                            my $chunks_list = $prefix.$s_range;
+                            my $chunks_list = $prefix_s.$s_range;
                             $rest_request_length -= length($chunks_list);
                             $body .= $chunks_list;
                         }
@@ -608,11 +609,18 @@ sub process_update_data {
             $add_range_info = $1 . " $list";
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
             if( @$nums ){
-                $self->storage->delete_add_chunks(chunknums => $nums, list => $list, cb => sub { $_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
-                # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
-                # chunknums are not storing in FULL_HASHES space any more
-                # Delete full hash as well
-                #$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
+                my $chunk_size = 500;
+                my $iters = int(scalar(@$nums)/$chunk_size)+1;
+                for( my $i = 0; $i < $iters; $i++){
+                    my $from = $i*$chunk_size;
+                    my $to = $chunk_size*($i+1)-1;
+                    $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
+                    $self->storage->delete_add_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")});
+                    # TODO change function delete_full_hashes() so as it could take prefix parameter instead of chunknum parameter.
+                    # chunknums are not storing in FULL_HASHES space any more
+                    # Delete full hash as well
+                    #$self->storage->delete_full_hashes(chunknums => $nums, list => $list, cb => sub {log_debug2(@_)}) ;
+                }
             }
         }
         elsif ($line =~ /sd:(\S+)$/) {
@@ -623,7 +631,16 @@ sub process_update_data {
             log_debug1("Delete Sub Chunks: $1");
 
             my $nums = AnyEvent::Net::SafeBrowsing3::Utils->expand_range($1);
-            $self->storage->delete_sub_chunks(chunknums => $nums, list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
+            if( @$nums ){
+                my $chunk_size = 500;
+                my $iters = int(scalar(@$nums)/$chunk_size)+1;
+                for( my $i = 0; $i < $iters; $i++){
+                    my $from = $i*$chunk_size;
+                    my $to = $chunk_size*($i+1)-1;
+                    $to = scalar(@$nums)-1 if $to >= scalar(@$nums);
+                    $self->storage->delete_sub_chunks(chunknums => [@$nums[$from..$to]], list => $list, cb => sub {$_[0] ? log_error("delete tarantool error") : log_debug2("Delete tarantool ok")}) if @$nums;
+                }
+            }
         }
         elsif ($line =~ /r:pleasereset/) {
             unless( $list ){
@@ -876,15 +893,23 @@ sub parse_data {
     my $list            = $args{list}       || '';
     my $cb              = $args{cb}     or die "Callback is required";
     
-    my $protobuf_len = 0;
-    my $protobuf_data = '';
-    
+    my $in_process=1;
+    my $have_error = 0;
+    my $watcher = sub {
+        my $err = shift;
+        $in_process--;
+        $have_error ||= $err;
+        log_debug2("Watcher parse: ".$in_process);
+        if(!$in_process){
+            $cb->($have_error);
+        }
+    };
+
     my $bulk_insert_a = [];
     my $bulk_insert_s = [];
-
     while (length $data > 0) {
-        $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
-        $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
+        my $protobuf_len = unpack('N', substr($data, 0, 4, '')); # UINT32
+        my $protobuf_data = AnyEvent::Net::SafeBrowsing3::ChunkData->decode(substr($data, 0, $protobuf_len, '')); # ref to perl hash structure
 
         # perl hash format of decoded protobuf data is 
         # (~ - for optional fields. they're available throught accessor):
@@ -899,18 +924,18 @@ sub parse_data {
         my $chunk_num = $protobuf_data->chunk_number();
         my $chunk_type = $protobuf_data->chunk_type();
         my $hash_length = $protobuf_data->prefix_type() ? 32 : 4;
-    
+
         if ($chunk_type == 0) {
             # it is add chunk
-            my @data = $self->parse_a(value => $protobuf_data->hashes(), hash_length => $hash_length);
-            foreach my $item (@data) {
+            my $data = $self->parse_a(value => $protobuf_data->hashes(), hash_length => $hash_length);
+            foreach my $item (@$data) {
                 push @$bulk_insert_a, { chunknum => $chunk_num, chunk => $item, list => $list };    
             }       
         }
         elsif ($chunk_type == 1) {
             # it is sub chunk
-            my @data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
-            foreach my $item (@data) {
+            my $data = $self->parse_s(value => $protobuf_data->hashes(), hash_length => $hash_length, add_chunknums => $protobuf_data->add_numbers() );
+            foreach my $item (@$data) {
                 push @$bulk_insert_s, { chunknum => $chunk_num, chunk => $item, list => $list };    
             }
         }
@@ -921,22 +946,19 @@ sub parse_data {
             return;
         } 
 
-        log_debug2(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), "OK");
+        log_debug1(join " ", "$list chunk", $chunk_type ? 's:' : 'a:', "$chunk_num:$hash_length:$protobuf_len", length($protobuf_data->hashes()||""), scalar(@$bulk_insert_a), ":", scalar(@$bulk_insert_s), "OK");
+	if( @$bulk_insert_a > 1000 ){
+            ++$in_process;
+    	    $self->storage->add_chunks_a($bulk_insert_a, $watcher);
+	    $bulk_insert_a = [];
+	}
+	if( @$bulk_insert_s > 1000 ){
+            ++$in_process;
+    	    $self->storage->add_chunks_s($bulk_insert_s, $watcher);
+	    $bulk_insert_s = [];
+	}
     }
-
-    my $in_process = 0; # how many tables are in update (add, sub)
-    my $have_error = 0;
-
-    my $watcher = sub {
-        my $err = shift;
-        $in_process--;
-        $have_error ||= $err;
-        log_debug2("Watcher parse: ".length( $data )."; ".$in_process);
-        if(!$in_process){
-            $cb->($have_error);
-        }
-    };
-    
+    $in_process--; 
     ++$in_process if @$bulk_insert_a;
     ++$in_process if @$bulk_insert_s;
     
@@ -988,7 +1010,7 @@ Length in bytes of each prefix. May be 4 or 32 (according to protocol).
 
 sub parse_s {
     my ($self, %args)  = @_;
-    my $value          = $args{value}          or return ();      
+    my $value          = $args{value}          or return [{prefix => '', add_chunknum => ''}];
     my $add_chunknums  = $args{add_chunknums}  or return (); 
     my $hash_length    = $args{hash_length};
     
@@ -1006,7 +1028,7 @@ sub parse_s {
         log_debug3("parsed s-prefix : $add_chunknum : $prefix");
     }
 
-    return @data;
+    return \@data;
 }
 
 
@@ -1042,9 +1064,9 @@ Length in bytes of each prefix. May be 4 or 32 (according to protocol).
 
 sub parse_a {
     my ($self, %args)  = @_;
-    my $value          = $args{value}         or return ();
+    my $value          = $args{value}         or return [{prefix => ''}];
     my $hash_length    = $args{hash_length}; 
-    
+
     my @data = (); 
     
     while (length $value > 0) {
@@ -1052,7 +1074,7 @@ sub parse_a {
         push @data, { prefix => $prefix };
         log_debug3("parsed a-prefix : $prefix");
     }
-    return @data;
+    return \@data;
 }
 
 =head2 canonical_domain()

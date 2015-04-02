@@ -1,4 +1,4 @@
-AnyEvent-Net-SafeBrowsing3 version 1.14
+AnyEvent-Net-SafeBrowsing3 version 3.59
 =====================================
 
 AnyEvent::Net::SafeBrowsing3 implements the Safe Browsing v3 API.
@@ -9,8 +9,6 @@ See the documentation (http://code.google.com/apis/safebrowsing/) for more detai
 The Safe Browsing database must be stored and managed locally.
 AnyEvent::Net::SafeBrowsing3::Tarantool uses Tarantool as the storage back-end.
 Other storage mechanisms (databases, memory, etc.) can be added and used transparently with this module.
-
-You may want to look at "Google Safe Browsing v3: Implementation Notes" (http://www.zscaler.com/research/Google%20Safe%20Browsing%20v2%20API.pdf), a collection of notes and real-world numbers about the API. This is intended for people who want to learn more about the API, whether as a user or to make their own implementation.
 
 The source code is available on github at https://github.com/Nikolo/AnyEvent-Net-SafeBrowsing3.git.
 
