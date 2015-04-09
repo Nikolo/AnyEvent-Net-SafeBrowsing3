@@ -1,4 +1,4 @@
-AnyEvent-Net-SafeBrowsing3 version 3.60
+AnyEvent-Net-SafeBrowsing3 version 3.61
 =====================================
 
 AnyEvent::Net::SafeBrowsing3 implements the Safe Browsing v3 API.

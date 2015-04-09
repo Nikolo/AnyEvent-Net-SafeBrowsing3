@@ -84,6 +84,7 @@ Required. Callback CodeRef
 has a_chunks_space    => (is => 'rw', isa => 'Int', required => 1);
 has s_chunks_space    => (is => 'rw', isa => 'Int', required => 1);
 has full_hashes_space => (is => 'rw', isa => 'Int', required => 1);
+has timeout           => (is => 'ro', isa => 'Int', default  => 1);
 has all_connected     => (is => 'ro', isa => 'CodeRef', default => sub {return sub{}});
 
 =head1 PUBLIC FUNCTIONS
@@ -114,6 +115,7 @@ sub BUILD {
 	}
 	$self->dbh(AnyEvent::Tarantool::Cluster->new(
 		servers => $servers,
+		timeout => $self->timeout,
 		spaces => {
 			$self->a_chunks_space() => {
 				name         => 'a_chunks',
