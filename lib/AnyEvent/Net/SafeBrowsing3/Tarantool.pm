@@ -149,8 +149,8 @@ sub BUILD {
 			},
 			$self->full_hashes_space() => {
 				name         => 'full_hashes',
-				fields       => [qw/list chunknum hash timestamp/],
-				types        => [qw/STR  NUM STR  NUM/],
+				fields       => [qw/list hash timestamp/],
+				types        => [qw/STR  STR  NUM/],
 				indexes      => {
                                         0 => {
 						name => 'idx_s_list_hash',

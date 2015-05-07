@@ -255,7 +255,7 @@ sub update {
                         $rest_request_length -= length($chunks_list);
                         $body .= $chunks_list;
                     }
-		    if ($s_range ne '' ){
+                    if ($s_range ne '' ){
                         if( $min_size < $rest_request_length ){
                             # min_size less than rest_length
                             my $more_than_rest = $rest_request_length - length($s_range) - length($prefix_s);
