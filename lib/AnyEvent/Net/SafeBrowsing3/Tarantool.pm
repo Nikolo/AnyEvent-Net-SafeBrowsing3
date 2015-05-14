@@ -234,9 +234,6 @@ sub get_add_chunks {
 	my $prefix        = $args{prefix}                            or die "prefix arg is required";
 	my $list          = $args{'lists'}                           or die "lists arg is required";
 	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
-	
-	warn ("===> in get_add_chunks() <===");
-	warn ("prefix: $prefix");
 
 	$self->dbh->slave->select('a_chunks', [map [$_, $prefix], @$list], {index => 1}, sub{
 		my ($result, $error) = @_;
@@ -306,10 +303,6 @@ sub get_full_hashes {
 	my $list          = $args{'list'}                            or die "lists arg is required";
 	my $timestamp     = $args{'timestamp'}                       or die "timestamp arg is required";
 	my $cb            = $args{'cb'};   ref $args{'cb'} eq 'CODE' or die "cb arg is required and must be CODEREF";
-	
-	warn ("===> in get_full_hashes() <===");
-	warn ("prefix: $prefix");
-	warn ("list: $list");
 
 	$self->dbh->slave->select('full_hashes', [[$list,$prefix]], {index => 1}, sub{
 		my ($result, $error) = @_;
@@ -320,14 +313,9 @@ sub get_full_hashes {
 		else {
 			my $space = $self->dbh->master->{spaces}->{full_hashes};
 			my $ret = [];
-			
 			foreach my $tup ( @{$result->{tuples}} ){
-				use Data::Dumper;
-				use feature qw/say/;
-				warn "===> tuple:";
-				warn Dumper($tup);
 				if( $tup->[$space->{fast}->{timestamp}->{no}] < $timestamp ){
-					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1]], sub {
+					$self->dbh->master->delete('full_hashes', [$tup->[0], $tup->[1], $tup->[2]], sub {
 						my ($result, $error) = @_;
 						log_error( "Tarantool error: ".$error ) if $error;
 					});
@@ -345,23 +333,23 @@ sub get_full_hashes {
 sub add_chunks_s {
 	my ($self, $chunks, $cb) = @_;
 	ref $cb eq 'CODE' || die "cb arg is required and must be CODEREF";
-        $self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
-                my ($result, $error) = @_;
-                log_error( "Tarantool error: ", $error ) if $error;
-                $cb->($error ? 1 : 0);
-        });
-        log_debug1("STORED s chunks");	
+	$self->dbh->master->lua( 'safebrowsing3.add_chunks_s3', [$self->s_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+		my ($result, $error) = @_;
+		log_error( "Tarantool error: ", $error ) if $error;
+		$cb->($error ? 1 : 0);
+	});
+	log_debug1("STORED s chunks");
 }
 
 sub add_chunks_a {
 	my ($self, $chunks, $cb) = @_;
 	ref $cb eq 'CODE' or die "cb arg is required and must be CODEREF";
-        $self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
-                my ($result, $error) = @_;
-                log_error( "Tarantool error: ", $error ) if $error;
-                $cb->($error ? 1 : 0);
-        });
-        log_debug1("STORED a chunks");	
+	$self->dbh->master->lua( 'safebrowsing3.add_chunks_a3', [$self->a_chunks_space(),JSON::XS->new->encode($chunks)], {in => 'pp', out => 'p'}, sub {
+		my ($result, $error) = @_;
+		log_error( "Tarantool error: ", $error ) if $error;
+		$cb->($error ? 1 : 0);
+	});
+	log_debug1("STORED a chunks");
 }
 
 sub add_full_hashes {
@@ -372,10 +360,10 @@ sub add_full_hashes {
 	my $inserted = 0;
 	my $err = 0;
 	foreach my $fhash (@$full_hashes) {
-		$self->dbh->master->insert('full_hashes', [$fhash->{list}, $fhash->{prefix}, $fhash->{hash}, $fhash->{timestamp}], sub {
+		$self->dbh->master->insert('full_hashes', [$fhash->{list}, unpack("H*", $fhash->{prefix}), unpack("H*", $fhash->{hash}), $fhash->{timestamp}], sub {
 			my ($result, $error) = @_;
 			log_error( "Tarantool error: ".$error ) if $error;
-			warn("added full hash");
+			log_debug1(join " ", "added full hash. prefix = ", $fhash->{prefix}, " hash = ", $fhash->{hash});
 			$inserted++;
 			$err ||= $error;
 			if( $inserted == @$full_hashes ){

@@ -350,7 +350,7 @@ Lookups a URL against the Safe Browsing database.
 
   my $match = $sb->lookup(list => ['goog-malware-shavar,googpub-phish-shavar'], url => 'http://www.gumblar.cn', cb => sub {});
 
-Returns the name of the list if there is any match, returns an empty string otherwise.
+Returns arrayref of matched list-names if there is any match, returns an empty arrayref otherwise.
 
 Arguments
 
@@ -362,7 +362,7 @@ Required. Lookup against specific list names. Should be a reference to array.
 
 =item url
 
-Required. URL to lookup.
+Required. URL to lookup. String.
 
 =item callback
 
@@ -433,7 +433,7 @@ sub lookup {
                        # find match between our computed full hashes and full hashes retrieved from local database
                        foreach my $full_hash (@full_hashes) {
                            foreach my $hash (@$hashes) {
-                               if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
+                               if ($hash->{hash} eq unpack('H*', $full_hash) && defined first { $hash->{list} eq $_ } @$lists) {
                                    log_debug2("Full hash was found in storage: ", $hash);
                                    $fnd = $hash->{list};
                                }
