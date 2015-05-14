@@ -255,7 +255,7 @@ sub update {
                         $rest_request_length -= length($chunks_list);
                         $body .= $chunks_list;
                     }
-		    if ($s_range ne '' ){
+                    if ($s_range ne '' ){
                         if( $min_size < $rest_request_length ){
                             # min_size less than rest_length
                             my $more_than_rest = $rest_request_length - length($s_range) - length($prefix_s);
@@ -350,7 +350,7 @@ Lookups a URL against the Safe Browsing database.
 
   my $match = $sb->lookup(list => ['goog-malware-shavar,googpub-phish-shavar'], url => 'http://www.gumblar.cn', cb => sub {});
 
-Returns the name of the list if there is any match, returns an empty string otherwise.
+Returns arrayref of matched list-names if there is any match, returns an empty arrayref otherwise.
 
 Arguments
 
@@ -362,7 +362,7 @@ Required. Lookup against specific list names. Should be a reference to array.
 
 =item url
 
-Required. URL to lookup.
+Required. URL to lookup. String.
 
 =item callback
 
@@ -433,7 +433,7 @@ sub lookup {
                        # find match between our computed full hashes and full hashes retrieved from local database
                        foreach my $full_hash (@full_hashes) {
                            foreach my $hash (@$hashes) {
-                               if ($hash->{hash} eq $full_hash && defined first { $hash->{list} eq $_ } @$lists) {
+                               if ($hash->{hash} eq unpack('H*', $full_hash) && defined first { $hash->{list} eq $_ } @$lists) {
                                    log_debug2("Full hash was found in storage: ", $hash);
                                    $fnd = $hash->{list};
                                }
@@ -447,7 +447,9 @@ sub lookup {
                        $self->request_full_hash(prefixes => [ map(pack( 'H*', $_->{prefix}), @$add_chunks) ], cb => sub {
                            my $hashes = shift;
                            my $debug_string = '';
-                           for my $line (@$hashes) { $debug_string .= "hash:" . unpack('H*', $line->{hash}) . " list:" . $line->{list} . " timestamp:". $line->{timestamp} . " " }
+                           for my $line (@$hashes) { $debug_string .= "prefix:" . unpack('H*', $line->{prefix}) . 
+                                                                      " hash:" . unpack('H*', $line->{hash}) . 
+                                                                      " list:" . $line->{list} . " timestamp:". $line->{timestamp} . " " }
                            log_debug1( "Full hashes: ". $debug_string);
                            $self->storage->add_full_hashes(full_hashes => $hashes, cb => sub {});
                        
@@ -1367,8 +1369,8 @@ Callback function that will be called after request_full_hash() is finished.
 Returns a reference to list of full hashes in callback:
 
   [ 
-    {list => listname1, hash => hash1, timestamp => valid_to1}, 
-    {list => listname2, hash => hash2, timestamp => valid_to2},
+    {list => listname1, prefix => prefix1, hash => hash1, timestamp => valid_to1}, 
+    {list => listname2, prefix => prefix2, hash => hash2, timestamp => valid_to2},
     ...
   ]
 
@@ -1379,7 +1381,7 @@ sub request_full_hash {
     my $prefixes        = $args{prefixes}; ref $prefixes eq 'ARRAY' or die "Arg prefixes is required and must be arrayref";
     my $cb              = $args{cb} or die "Args cb is required";
     my $size            = length $prefixes->[0];
-#   # Handle errors
+    # Handle errors
     my $i = 0;
     my $errors;
     my $delay = sub {
@@ -1490,7 +1492,8 @@ sub request_full_hash {
                 # 5) unpack hashes (binary). length of each hash = $hash_size
                 for (my $i = 0; $i < $num_responses; ++$i) {
                     my $hash = substr($data, 0, $hash_size, ''); 
-                    push(@hashes, { hash => $hash, list => $list, timestamp => $valid_to });
+                    my $prefix = substr($hash, 0, 4);
+                    push(@hashes, { list => $list, prefix => $prefix, hash => $hash, timestamp => $valid_to });
                 }
                 
                 # 6) unpack metadata (2\nAA3\nBBBnext_text)
