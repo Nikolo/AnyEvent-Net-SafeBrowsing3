@@ -17,7 +17,7 @@ use Mouse;
 use AnyEvent::HTTP;
 use Google::ProtocolBuffers;
 
-our $VERSION = '3.64';
+our $VERSION = '3.66';
 
 =head1 NAME
 
