@@ -404,10 +404,9 @@ sub lookup {
             my $processed = 0;
             my $watcher = sub {
                 my $list = shift;
-warn unpack("H*", $prefix)." NFH ".scalar(@$need_fullhash);
                 push @$found, $list if $list;  
                 $processed++;
-                if($processed == @$add_chunks){
+                if($processed >= @$add_chunks){
                     if (@$found) {
                         $cb->($found);
                     }
